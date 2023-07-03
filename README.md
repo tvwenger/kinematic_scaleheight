@@ -14,16 +14,15 @@ pip install git+https://github.com/tvwenger/kinematic_scaleheight.git
 ```python
 from kinematic_scaleheight.simulate import gen_synthetic_sample
 glong, glat, vlsr, truths = gen_synthetic_sample(
-    1000, # sample size
+    200, # sample size
     100.0, # standard deviation of the Gaussian vertical distribution of clouds (pc)
-    vlsr_err=5.0, # noise added to observed LSR velocities (km/s)
+    vlsr_err=10.0, # noise added to observed LSR velocities (km/s)
     glat_err=0.1, # noise added to observed latitude (deg)
     d_max=1000.0, # maximum midplane distance of the clouds (pc)
-    b_min=10.0, # minimum Galactic latitude (deg)
-    b_max=30.0, # maximum Galactic latitude (deg)
+    b_min=0.0, # minimum Galactic latitude (deg)
+    b_max=90.0, # maximum Galactic latitude (deg)
     seed=1234, # random seed
 )
-print(glong.size) # 1000
 print(truths.keys()) # dict_keys(['distance', 'sigma_z', 'vlsr_err', 'glat_err', 'R0', 'Usun', 'Vsun', 'Wsun', 'a2', 'a3'])
 ```
 
@@ -39,8 +38,8 @@ model = Model(
     prior_distance=500.0, # half-width of distance prior (pc)
     prior_vlsr_err=10.0, # half-width of vlsr_err prior (km/s)
     glat_err=0.1, # latitude likelihood width (deg)
-    b_min=10.0, # minimum Galactic latitude (deg)
-    b_max=30.0, # maximum Galactic latitude
+    b_min=0.0, # minimum Galactic latitude (deg)
+    b_max=90.0, # maximum Galactic latitude
 )
 
 # prior predictive check

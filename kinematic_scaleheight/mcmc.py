@@ -292,7 +292,7 @@ class Model:
 
         # z distribution
         fig, ax = plt.subplots()
-        bins = np.linspace(0.0, 5.0 * samples["abs_z"].max(), 25)
+        bins = np.linspace(0.0, samples["abs_z"].max(), 25)
         for chain in predictive.chain:
             for draw in predictive.draw:
                 ax.hist(
@@ -376,16 +376,18 @@ class Model:
 
         Returns: Nothing
         """
-        truth_vals = [
-            truths["R0"],
-            truths["Usun"],
-            truths["Vsun"],
-            truths["Wsun"],
-            truths["a2"],
-            truths["a3"],
-            truths["sigma_z"],
-            truths["vlsr_err"],
-        ]
+        truth_vals = None
+        if truths is not None:
+            truth_vals = [
+                truths["R0"],
+                truths["Usun"],
+                truths["Vsun"],
+                truths["Wsun"],
+                truths["a2"],
+                truths["a3"],
+                truths["sigma_z"],
+                truths["vlsr_err"],
+            ]
         fig = corner.corner(
             self.trace, var_names=["rotcurve", "sigma_z", "vlsr_err"], truths=truth_vals
         )
