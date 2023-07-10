@@ -29,7 +29,7 @@ import pytensor.tensor as pt
 #
 # Reid+2019 A5 rotation model parameters
 #
-__R0 = 8166.0  # pc
+__R0 = 8.1660  # kpc
 __Usun = 10.449  # km/s
 __Vsun = 12.092  # km/s
 __Wsun = 7.729  # km/s
