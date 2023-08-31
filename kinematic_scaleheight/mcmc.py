@@ -153,11 +153,11 @@ class Model:
         """
         Generate prior or posterior predictive samples and plots. The plots are:
         name                description
-        lv_prior.pdf        Longitude-velocity predictive
-        lb_prior.pdf        Longitude-latitude predictive
-        ld_prior.pdf        Longitude-distance predictive
-        abs_glat_prior.pdf  Histogram of latitude predictive
-        abs_z_prior.pdf     Histogram of |z| predictive
+        lv_{predtype}.pdf        Longitude-velocity predictive
+        lb_{predtype}.pdf        Longitude-latitude predictive
+        ld_{predtype}.pdf        Longitude-distance predictive
+        abs_glat_{predtype}.pdf  Histogram of latitude predictive
+        abs_z_{predtype}.pdf     Histogram of |z| predictive
 
         Inputs:
             predtype :: string
