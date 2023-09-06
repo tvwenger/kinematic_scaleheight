@@ -43,13 +43,16 @@ model = Model(
 )
 
 # prior predictive check
+# N.B. This no longer works due to limitations in pymc
 !mkdir example
+"""
 model.plot_predictive(
     "prior", # prior predictive
     50, # prior predictive samples
     truths=truths, # optional truths dictionary
     plot_prefix="example/", # plot filename prefix
 )
+"""
 
 # posterior sampling
 model.sample(

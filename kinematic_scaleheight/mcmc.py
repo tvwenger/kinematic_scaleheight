@@ -107,17 +107,21 @@ class Model:
                 "rotcurve", mu=reid19_mean, cov=reid19_cov
             )
 
-            # half-normal distribution in |z|
-            sigma_z = pm.HalfNormal("sigma_z", sigma=prior_sigma_z)
-            abs_z = pm.HalfNormal(
-                "abs_z",
-                sigma=sigma_z,
-                shape=(self.size,),
-            )
-
             # midplane distance
             midplane_dist = pm.HalfNormal(
                 "midplane_dist", sigma=prior_distance, shape=(self.size,)
+            )
+
+            # truncated half-normal distribution in |z|
+            sigma_z = pm.HalfNormal("sigma_z", sigma=prior_sigma_z)
+            abs_z_min = midplane_dist * np.tan(np.deg2rad(b_min))
+            abs_z_max = midplane_dist * np.tan(np.deg2rad(b_max))
+            abs_z = pm.Truncated(
+                "abs_z",
+                pm.HalfNormal.dist(sigma=sigma_z),
+                lower=abs_z_min,
+                upper=abs_z_max,
+                shape=(self.size,),
             )
 
             # latitude
@@ -313,6 +317,7 @@ class Model:
                 density=True,
                 label="Truth",
             )
+            """
             ax.plot(
                 bins,
                 np.exp(
@@ -322,6 +327,7 @@ class Model:
                 linewidth=2,
                 label="Expectation",
             )
+            """
             ax.legend(loc="best")
         ax.set_xlabel(r"$|z|$ (pc)")
         ax.set_ylabel(r"Probability Density")
