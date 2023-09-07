@@ -115,7 +115,9 @@ class Model:
             # truncated half-normal distribution in |z|
             sigma_z = pm.HalfNormal("sigma_z", sigma=prior_sigma_z)
             abs_z_min = midplane_dist * np.tan(np.deg2rad(b_min))
-            abs_z_max = midplane_dist * np.tan(np.deg2rad(b_max))
+            abs_z_max = np.inf
+            if b_max < 90.0:
+                abs_z_max = midplane_dist * np.tan(np.deg2rad(b_max))
             abs_z = pm.Truncated(
                 "abs_z",
                 pm.HalfNormal.dist(sigma=sigma_z),
