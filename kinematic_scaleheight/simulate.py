@@ -34,7 +34,6 @@ def gen_synthetic_sample(
     n,
     sigma_z,
     vlsr_err=10.0,
-    glat_err=0.1,
     d_max=1000.0,
     b_min=10.0,
     b_max=30.0,
@@ -52,10 +51,8 @@ def gen_synthetic_sample(
             Standard deviation of vertical distribution
         vlsr_err :: scalar (km/s)
             Noise added to LSR velocity.
-        glat_err :: scalar (deg)
-            Noise added to the Galactic latitude
         d_max :: scalar (pc)
-            Maximum mid-plane distance
+            Maximum distance
         b_min, b_max :: scalars (deg)
             Minimum and maximum absolute Galactic latitude
         seed :: integer
@@ -88,30 +85,21 @@ def gen_synthetic_sample(
     distance = np.empty(0)
 
     while len(glong) < n:
-        # Heliocentric midplane distance
-        midplane_dist = d_max * np.sqrt(rng.uniform(0, 1, size=10 * n))
-
-        # GC is at (R0, 0, 0)
-        new_glong = rng.uniform(0.0, 360.0, size=10 * n)
-        X = midplane_dist * np.cos(np.deg2rad(new_glong))
-        Y = midplane_dist * np.sin(np.deg2rad(new_glong))
-
-        # Gaussian distribution in Z
+        # Heliocentric position
+        X = rng.uniform(-d_max, d_max, size=10 * n)
+        Y = rng.uniform(-d_max, d_max, size=10 * n)
         Z = rng.normal(0.0, sigma_z, size=10 * n)
-
-        # true distance
         new_distance = np.sqrt(X**2.0 + Y**2.0 + Z**2.0)
 
-        # Galactic latitude
+        # Galactic coordinates
+        new_glong = np.rad2deg(np.arctan2(Y, X)) % 360.0
         new_glat = np.rad2deg(np.arcsin(Z / new_distance))
-        new_glat += rng.normal(0.0, glat_err, size=10 * n)
 
         # LSR velocity from rotation curve
         new_vlsr = reid19_vlsr(
             new_glong,
             new_glat,
-            midplane_dist / 1000.0,  # kpc
-            Z / 1000.0,  # kpc
+            new_distance / 1000.0,  # kpc
             R0=R0,
             a2=a2,
             a3=a3,
@@ -119,7 +107,7 @@ def gen_synthetic_sample(
             Vsun=Vsun,
             Wsun=Wsun,
         ).eval()
-        new_vlsr += rng.normal(0.0, vlsr_err, size=10 * n)
+        new_vlsr += rng.normal(0.0, vlsr_err, size=new_vlsr.size)
 
         # check longitude and latitude limits
         good = (
@@ -128,6 +116,7 @@ def gen_synthetic_sample(
             & (new_glong < 345.0)
             & (np.abs(new_glat) > b_min)
             & (np.abs(new_glat) < b_max)
+            & (new_distance < d_max)
         )
 
         # save
@@ -147,7 +136,6 @@ def gen_synthetic_sample(
         "distance": distance,
         "sigma_z": sigma_z,
         "vlsr_err": vlsr_err,
-        "glat_err": glat_err,
         "R0": R0,
         "Usun": Usun,
         "Vsun": Vsun,

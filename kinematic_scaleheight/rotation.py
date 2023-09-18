@@ -23,8 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Trey Wenger - June 2023
 """
 
+import pymc as pm
 import numpy as np
-import pytensor.tensor as pt
 
 #
 # Reid+2019 A5 rotation model parameters
@@ -63,22 +63,25 @@ def reid19_theta(R, R0=__R0, a2=__a2, a3=__a3):
     """
     rho = R / (a2 * R0)
     lam = (a3 / 1.5) ** 5.0
-    loglam = np.log10(lam)
+    loglam = pm.math.log(lam) / pm.math.log(10.0)
     term1 = 200.0 * lam**0.41
-    term2 = np.sqrt(
-        0.8 + 0.49 * loglam + 0.75 * np.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4)
+    term2 = pm.math.sqrt(
+        0.8
+        + 0.49 * loglam
+        + 0.75 * pm.math.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4)
     )
     term3 = (0.72 + 0.44 * loglam) * 1.97 * rho**1.22 / (rho**2.0 + 0.61) ** 1.43
-    term4 = 1.6 * np.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
-    theta = term1 / term2 * np.sqrt(term3 + term4)
+    term4 = (
+        1.6 * pm.math.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
+    )
+    theta = term1 / term2 * pm.math.sqrt(term3 + term4)
     return theta
 
 
 def reid19_vlsr(
     glong,
     glat,
-    midplane_dist,
-    Z,
+    distance,
     R0=__R0,
     a2=__a2,
     a3=__a3,
@@ -93,10 +96,8 @@ def reid19_vlsr(
     Inputs:
         glong, glat :: scalars (deg)
             Galactic longitude and latitude
-        midplane_dist :: scalar (kpc)
-            Mid-plane distance (dist * cos(glat))
-        Z :: scalar (kpc)
-            Height above plane (dist * sin(glat))
+        distance :: scalar (kpc)
+            Distance
         R0 :: scalar (kpc)
             Solar Galactocentric radius
         a2, a3 :: scalar
@@ -108,23 +109,23 @@ def reid19_vlsr(
         vlsr :: scalar (km/s)
             LSR velocity
     """
-    cos_glong = np.cos(np.deg2rad(glong))
-    sin_glong = np.sin(np.deg2rad(glong))
-    cos_glat = np.cos(np.deg2rad(glat))
-    sin_glat = np.sin(np.deg2rad(glat))
+    cos_glong = pm.math.cos(np.deg2rad(glong))
+    sin_glong = pm.math.sin(np.deg2rad(glong))
+    cos_glat = pm.math.cos(np.deg2rad(glat))
+    sin_glat = pm.math.sin(np.deg2rad(glat))
 
     # Barycentric cartesian coordinates. GC is at (R0, 0, 0)
-    X = midplane_dist * cos_glong
-    Y = midplane_dist * sin_glong
-    distance = np.sqrt(midplane_dist**2.0 + Z**2.0)
+    midplane_distance = distance * cos_glat
+    X = midplane_distance * cos_glong
+    Y = midplane_distance * sin_glong
+    Z = distance * sin_glat
 
-    # calculate Galactocentric radius via law of cosines
-    R = np.sqrt(R0**2.0 + midplane_dist**2.0 - 2.0 * R0 * midplane_dist * cos_glong)
+    # Galactocentric radius
+    R = pm.math.sqrt((X - R0) ** 2.0 + Y**2.0)
 
     # calculate Galactocentric azimuth
-    az = pt.arctan2(midplane_dist * sin_glong, R0 - midplane_dist * cos_glong)
-    sin_az = np.sin(az)
-    cos_az = np.cos(az)
+    sin_az = Y / R
+    cos_az = (R0 - X) / R
 
     # Circular velocity
     theta = reid19_theta(R, R0=R0, a2=a2, a3=a3)

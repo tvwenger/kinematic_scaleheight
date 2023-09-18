@@ -28,9 +28,10 @@ import os
 import pickle
 import numpy as np
 import pymc as pm
-import pytensor.tensor as pt
 import matplotlib.pyplot as plt
 import corner
+
+from pymc_experimental.distributions import Chi
 
 from .rotation import reid19_vlsr
 
@@ -46,11 +47,8 @@ class Model:
         glat,
         vlsr,
         prior_sigma_z=100.0,
-        prior_distance=500.0,
         prior_vlsr_err=10.0,
-        glat_err=0.1,
-        b_min=10.0,
-        b_max=30.0,
+        d_max=1000.0,
     ):
         """
         Initialize a new model.
@@ -64,15 +62,10 @@ class Model:
                 LSR velocities of clouds
             prior_sigma_z :: scalar (pc)
                 Width of half-normal prior distribution on sigma_z
-            prior_distance :: scalar (pc)
-                Width of the half-normal prior distribution on distance
             prior_vlsr_err :: scalar (km/s)
-                Width of the half-normal prior distribution on the width of the
-                LSR velocity likelihood
-            glat_err :: scalar (deg)
-                Width of the Galactic latitude likelihood
-            b_min, b_max :: scalars (deg)
-                Minimum and maximum Galactic latitude
+                Width of half-normal prior distribution on vlsr_err
+            d_max :: scalar (pc)
+                Truncate distance prior at this distance
 
         Returns: model
             model :: Model
@@ -107,44 +100,25 @@ class Model:
                 "rotcurve", mu=reid19_mean, cov=reid19_cov
             )
 
-            # midplane distance
-            midplane_dist = pm.HalfNormal(
-                "midplane_dist", sigma=prior_distance, shape=(self.size,)
-            )
+            # scale height
+            sigma_z = pm.Gamma("sigma_z", alpha=2.0, beta=1.0 / prior_sigma_z)
 
-            # truncated half-normal distribution in |z|
-            sigma_z = pm.HalfNormal("sigma_z", sigma=prior_sigma_z)
-            abs_z_min = midplane_dist * np.tan(np.deg2rad(b_min))
-            abs_z_max = np.inf
-            if b_max < 90.0:
-                abs_z_max = midplane_dist * np.tan(np.deg2rad(b_max))
-            abs_z = pm.Truncated(
-                "abs_z",
-                pm.HalfNormal.dist(sigma=sigma_z),
-                lower=abs_z_min,
-                upper=abs_z_max,
+            # distance
+            distance = pm.Truncated(
+                "distance",
+                Chi.dist(
+                    df=3, sigma=sigma_z / pm.math.sin(pm.math.abs(np.deg2rad(glat)))
+                ),
+                upper=d_max,
                 shape=(self.size,),
             )
 
-            # latitude
-            abs_glat_mu = pt.rad2deg(pt.arctan2(abs_z, midplane_dist))
-
-            # truncate latitude likelihood
-            abs_glat = pm.TruncatedNormal(
-                "abs_glat",
-                mu=abs_glat_mu,
-                sigma=glat_err,
-                lower=b_min,
-                upper=b_max,
-                observed=np.abs(glat),
-            )
-
             # velocity
+            vlsr_err = pm.HalfNormal("vlsr_err", sigma=prior_vlsr_err)
             vlsr_mu = reid19_vlsr(
                 glong,
-                abs_glat,
-                midplane_dist / 1000.0,  # kpc
-                abs_z / 1000.0,  # kpc
+                glat,
+                distance / 1000.0,  # kpc
                 R0=R0,
                 a2=a2,
                 a3=a3,
@@ -152,7 +126,6 @@ class Model:
                 Vsun=Vsun,
                 Wsun=Wsun,
             )
-            vlsr_err = pm.HalfNormal("vlsr_err", sigma=prior_vlsr_err)
             _ = pm.Normal("vlsr", mu=vlsr_mu, sigma=vlsr_err, observed=vlsr)
 
     def plot_predictive(self, predtype, num, truths=None, plot_prefix=""):
@@ -160,10 +133,7 @@ class Model:
         Generate prior or posterior predictive samples and plots. The plots are:
         name                description
         lv_{predtype}.pdf        Longitude-velocity predictive
-        lb_{predtype}.pdf        Longitude-latitude predictive
         ld_{predtype}.pdf        Longitude-distance predictive
-        abs_glat_{predtype}.pdf  Histogram of latitude predictive
-        abs_z_{predtype}.pdf     Histogram of |z| predictive
 
         Inputs:
             predtype :: string
@@ -172,10 +142,8 @@ class Model:
                 Number of predictive samples to generate
             truths :: dictionary
                 If not None, the dictionary should include the key
-                'distance' with the true distance for each target
-                and 'sigma_z' with the true vertical distribution
-                scale height. These values are incorporated to the
-                relevant plots.
+                'distance' with the true distance for each target.
+                These values are incorporated to the relevant plots.
             plot_prefix :: string
                 Save plots with names like {plot_prefix}{name}.pdf
 
@@ -220,33 +188,12 @@ class Model:
         fig.savefig(f"{plot_prefix}lv_{predtype}.pdf", bbox_inches="tight")
         plt.close(fig)
 
-        # longitude-latitude
-        fig, ax = plt.subplots()
-        for chain in predictive.chain:
-            for draw in predictive.draw:
-                ax.plot(
-                    predictive["abs_glat"].sel(chain=chain, draw=draw),
-                    self.wrap_glong,
-                    ".",
-                    alpha=0.1,
-                    markersize=1,
-                )
-        ax.plot(
-            np.abs(self.glat), self.wrap_glong, "r.", markersize=1, label="Observed"
-        )
-        ax.set_xlabel(r"Absolute Galactic Latitude (deg)")
-        ax.set_ylabel(r"Galactic Longitude (deg)")
-        ax.legend(loc="best")
-        fig.tight_layout()
-        fig.savefig(f"{plot_prefix}lb_{predtype}.pdf", bbox_inches="tight")
-        plt.close(fig)
-
         # longitude-distance
         fig, ax = plt.subplots()
         for chain in predictive.chain:
             for draw in predictive.draw:
                 ax.plot(
-                    samples["midplane_dist"].sel(chain=chain, draw=draw),
+                    samples["distance"].sel(chain=chain, draw=draw),
                     self.wrap_glong,
                     "k.",
                     alpha=0.1,
@@ -254,90 +201,28 @@ class Model:
                 )
         if truths is not None:
             ax.plot(
-                truths["distance"] * np.cos(np.deg2rad(self.glat)),
+                truths["distance"],
                 self.wrap_glong,
                 "r.",
                 markersize=1,
                 label="Truth",
             )
             ax.legend(loc="best")
-        ax.set_xlabel(r"Midplane Distance (pc)")
+        ax.set_xlabel(r"Distance (pc)")
         ax.set_ylabel(r"Galactic Longitude (deg)")
         fig.tight_layout()
         fig.savefig(f"{plot_prefix}ld_{predtype}.pdf", bbox_inches="tight")
         plt.close(fig)
 
-        # latitude distribution
-        fig, ax = plt.subplots()
-        bins = np.arange(0.0, 90.1, 2.0)
-        for chain in predictive.chain:
-            for draw in predictive.draw:
-                ax.hist(
-                    predictive["abs_glat"].sel(chain=chain, draw=draw),
-                    bins=bins,
-                    histtype="step",
-                    color="k",
-                    alpha=0.1,
-                    density=True,
-                )
-        ax.hist(
-            np.abs(self.glat),
-            bins=bins,
-            histtype="step",
-            color="r",
-            linewidth=2.0,
-            density=True,
-            label="Observed",
-        )
-        ax.set_xlabel(r"$|b|$ (deg)")
-        ax.set_ylabel(r"Probability Density")
-        ax.legend(loc="best")
-        fig.tight_layout()
-        fig.savefig(f"{plot_prefix}abs_glat_{predtype}.pdf", bbox_inches="tight")
-        plt.close(fig)
-
-        # z distribution
-        fig, ax = plt.subplots()
-        bins = np.linspace(0.0, samples["abs_z"].max(), 25)
-        for chain in predictive.chain:
-            for draw in predictive.draw:
-                ax.hist(
-                    samples["abs_z"].sel(chain=chain, draw=draw),
-                    bins=bins,
-                    histtype="step",
-                    color="k",
-                    alpha=0.1,
-                    density=True,
-                )
-        if truths is not None:
-            ax.hist(
-                truths["distance"] * np.sin(np.deg2rad(np.abs(self.glat))),
-                bins=bins,
-                histtype="step",
-                color="r",
-                linewidth=2.0,
-                density=True,
-                label="Truth",
-            )
-            """
-            ax.plot(
-                bins,
-                np.exp(
-                    pm.HalfNormal.logp(bins, loc=0.0, sigma=truths["sigma_z"]).eval()
-                ),
-                "g-",
-                linewidth=2,
-                label="Expectation",
-            )
-            """
-            ax.legend(loc="best")
-        ax.set_xlabel(r"$|z|$ (pc)")
-        ax.set_ylabel(r"Probability Density")
-        fig.tight_layout()
-        fig.savefig(f"{plot_prefix}abs_z_{predtype}.pdf", bbox_inches="tight")
-        plt.close(fig)
-
-    def sample(self, tune=1000, draws=1000, cores=4, chains=4, target_accept=0.8):
+    def sample(
+        self,
+        tune=1000,
+        draws=1000,
+        cores=4,
+        chains=4,
+        init="adapt_diag",
+        target_accept=0.8,
+    ):
         """
         Generate posterior samples of the model.
 
@@ -350,6 +235,8 @@ class Model:
                 Number of CPU cores to use in parallel
             chains :: integer
                 Number of MC chains
+            init :: string
+                Initialization method. Default is the pymc default: "jitter+adapt_diag"
             target_accept :: scalar
                 Target accept fraction
 
@@ -358,7 +245,7 @@ class Model:
         # sample posterior
         with self.model:
             self.trace = pm.sample(
-                init="adapt_diag",
+                init=init,
                 tune=tune,
                 draws=draws,
                 cores=cores,
