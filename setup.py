@@ -27,6 +27,6 @@ setup(
     author="Trey V. Wenger",
     author_email="tvwenger@gmail.com",
     packages=["kinematic_scaleheight"],
-    install_requires=["numpy", "scipy", "matplotlib", "pymc", "corner"],
+    install_requires=["numpy", "scipy", "matplotlib", "pymc==5.8.2", "corner"],
     package_data={"kinematic_scaleheight": ["data/reid19_mv.pkl"]},
 )
