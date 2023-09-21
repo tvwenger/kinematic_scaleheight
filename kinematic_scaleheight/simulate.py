@@ -27,6 +27,7 @@ import os
 import pickle
 import numpy as np
 from scipy.stats import multivariate_normal
+
 from .rotation import reid19_vlsr
 
 
@@ -40,9 +41,7 @@ def gen_synthetic_sample(
     seed=1234,
 ):
     """
-    Generate a sample of synthetic observations. Exclude targets
-    within 15 degrees of the Galactic center, 20 degrees of the
-    Galactic anti-center, or outside of (b_min, b_max)
+    Generate a sample of synthetic observations between b_min and b_max.
 
     Inputs:
         n :: integer
@@ -106,15 +105,12 @@ def gen_synthetic_sample(
             Usun=Usun,
             Vsun=Vsun,
             Wsun=Wsun,
-        ).eval()
+        )
         new_vlsr += rng.normal(0.0, vlsr_err, size=new_vlsr.size)
 
         # check longitude and latitude limits
         good = (
-            (new_glong > 15.0)
-            & ((new_glong < 160.0) | (new_glong > 200.0))
-            & (new_glong < 345.0)
-            & (np.abs(new_glat) > b_min)
+            (np.abs(new_glat) > b_min)
             & (np.abs(new_glat) < b_max)
             & (new_distance < d_max)
         )

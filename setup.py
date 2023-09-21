@@ -22,7 +22,7 @@ from setuptools import setup
 
 setup(
     name="kinematic_scaleheight",
-    version="1.3",
+    version="1.4",
     description="Kinematic estimates of vertical cloud distribution",
     author="Trey V. Wenger",
     author_email="tvwenger@gmail.com",

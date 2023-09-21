@@ -23,7 +23,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Trey Wenger - June 2023
 """
 
-import pymc as pm
 import numpy as np
 
 #
@@ -63,18 +62,14 @@ def reid19_theta(R, R0=__R0, a2=__a2, a3=__a3):
     """
     rho = R / (a2 * R0)
     lam = (a3 / 1.5) ** 5.0
-    loglam = pm.math.log(lam) / pm.math.log(10.0)
+    loglam = np.log10(lam)
     term1 = 200.0 * lam**0.41
-    term2 = pm.math.sqrt(
-        0.8
-        + 0.49 * loglam
-        + 0.75 * pm.math.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4)
+    term2 = np.sqrt(
+        0.8 + 0.49 * loglam + 0.75 * np.exp(-0.4 * lam) / (0.47 + 2.25 * lam**0.4)
     )
     term3 = (0.72 + 0.44 * loglam) * 1.97 * rho**1.22 / (rho**2.0 + 0.61) ** 1.43
-    term4 = (
-        1.6 * pm.math.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
-    )
-    theta = term1 / term2 * pm.math.sqrt(term3 + term4)
+    term4 = 1.6 * np.exp(-0.4 * lam) * rho**2.0 / (rho**2.0 + 2.25 * lam**0.4)
+    theta = term1 / term2 * np.sqrt(term3 + term4)
     return theta
 
 
@@ -109,19 +104,18 @@ def reid19_vlsr(
         vlsr :: scalar (km/s)
             LSR velocity
     """
-    cos_glong = pm.math.cos(np.deg2rad(glong))
-    sin_glong = pm.math.sin(np.deg2rad(glong))
-    cos_glat = pm.math.cos(np.deg2rad(glat))
-    sin_glat = pm.math.sin(np.deg2rad(glat))
+    cos_glong = np.cos(np.deg2rad(glong))
+    sin_glong = np.sin(np.deg2rad(glong))
+    cos_glat = np.cos(np.deg2rad(glat))
+    sin_glat = np.sin(np.deg2rad(glat))
 
     # Barycentric cartesian coordinates. GC is at (R0, 0, 0)
     midplane_distance = distance * cos_glat
     X = midplane_distance * cos_glong
     Y = midplane_distance * sin_glong
-    Z = distance * sin_glat
 
     # Galactocentric radius
-    R = pm.math.sqrt((X - R0) ** 2.0 + Y**2.0)
+    R = np.sqrt((X - R0) ** 2.0 + Y**2.0)
 
     # calculate Galactocentric azimuth
     sin_az = Y / R
@@ -135,16 +129,11 @@ def reid19_vlsr(
     vXg = theta * sin_az
     vYg = theta * cos_az
 
-    # Cartesian velocities in the barycentric frame.
-    vXb = vXg - Usun
-    vYb = vYg - theta0 - Vsun
-    vZb = -Wsun
-
-    # Barycentric velocity
-    vbary = (X * vXb + Y * vYb + Z * vZb) / distance
+    # Cartesian velocities in the IAU-defined LSR frame
+    vXb = __Ustd + vXg - Usun
+    vYb = __Vstd + vYg - theta0 - Vsun
+    vZb = __Wstd - Wsun
 
     # IAU-defined LSR
-    vlsr = (
-        vbary + (__Ustd * cos_glong + __Vstd * sin_glong) * cos_glat + __Wstd * sin_glat
-    )
+    vlsr = (vXb * cos_glong + vYb * sin_glong) * cos_glat + vZb * sin_glat
     return vlsr
