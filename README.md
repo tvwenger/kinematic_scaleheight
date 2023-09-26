@@ -557,6 +557,7 @@ model.sample(
 #                mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
 # shape        98.320  5.288  88.672  108.373      0.068    0.048    6073.0    2649.0    1.0
 # vlsr_err      4.890  0.112   4.683    5.101      0.001    0.001    7093.0    2859.0    1.0
+```
 
 # Caveats
 
