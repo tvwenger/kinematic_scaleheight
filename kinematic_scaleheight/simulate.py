@@ -28,12 +28,13 @@ import pickle
 import numpy as np
 from scipy.stats import multivariate_normal
 
-from .rotation import reid19_vlsr
+from kinematic_scaleheight.rotation import reid19_vlsr
 
 
 def gen_synthetic_sample(
     n,
-    sigma_z,
+    distribution="gaussian",
+    shape=100.0,
     vlsr_err=10.0,
     d_max=1000.0,
     b_min=10.0,
@@ -46,8 +47,14 @@ def gen_synthetic_sample(
     Inputs:
         n :: integer
             Sample size
-        sigma_z :: scalar (pc)
-            Standard deviation of vertical distribution
+        distribution :: string
+            One of "gaussian", "exponential", or "rectangular", the
+            vertical distribution of clouds
+        shape :: scalar (pc)
+            The shape parameter of the distribution.
+            Gaussian :: standard deviation
+            Exponential :: scale height
+            Rectangular :: half-width
         vlsr_err :: scalar (km/s)
             Noise added to LSR velocity.
         d_max :: scalar (pc)
@@ -84,10 +91,27 @@ def gen_synthetic_sample(
     distance = np.empty(0)
 
     while len(glong) < n:
-        # Heliocentric position
+        # Heliocentric position. Draw 10x sample size
+        # since we will have to throw away some
         X = rng.uniform(-d_max, d_max, size=10 * n)
         Y = rng.uniform(-d_max, d_max, size=10 * n)
-        Z = rng.normal(0.0, sigma_z, size=10 * n)
+        if distribution == "gaussian":
+            Z = rng.normal(0.0, shape, size=10 * n)
+            mom1_abs_z = np.sqrt(2.0 / np.pi) * shape
+            mom3_mom2_abs_z_ratio = 2.0 * np.sqrt(2.0 / np.pi) * shape
+        elif distribution == "exponential":
+            sign = rng.integers(0, 1, endpoint=True, size=10 * n) * 2 - 1
+            Z = sign * rng.exponential(shape, size=10 * n)
+            mom1_abs_z = shape
+            mom3_mom2_abs_z_ratio = 3.0 * shape
+        elif distribution == "rectangular":
+            Z = rng.uniform(-shape, shape, size=10 * n)
+            mom1_abs_z = shape / 2.0
+            mom3_mom2_abs_z_ratio = 3.0 / 4.0 * shape
+        else:
+            raise NotImplementedError(f"{distribution} not available")
+
+        # Heliocentric distance
         new_distance = np.sqrt(X**2.0 + Y**2.0 + Z**2.0)
 
         # Galactic coordinates
@@ -130,7 +154,10 @@ def gen_synthetic_sample(
     # store truths separately
     truths = {
         "distance": distance,
-        "sigma_z": sigma_z,
+        "distribution": distribution,
+        "shape": shape,
+        "mom1_abs_z": mom1_abs_z,
+        "mom3_mom2_abs_z_ratio": mom3_mom2_abs_z_ratio,
         "vlsr_err": vlsr_err,
         "R0": R0,
         "Usun": Usun,
