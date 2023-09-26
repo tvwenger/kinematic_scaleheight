@@ -25,7 +25,9 @@ Trey Wenger - September 2023
 """
 
 import numpy as np
-from scipy.optimize import leastsq
+from scipy import optimize
+
+from kinematic_scaleheight.rotation import reid19_vlsr
 
 
 def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, oortA=15.3):
@@ -59,9 +61,9 @@ def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, oortA=15.3):
     return vlsr
 
 
-def crovisier(glong, glat, vlsr, oortA=15.3, corrected=False):
+def crovisier(glong, glat, vlsr, oortA=15.3):
     """
-    Estimate the first moment of the |z| distribution of some clouds using
+    Estimate the first raw moment of the |z| distribution of some clouds using
     the least-squares method of Crovisier (1978).
 
     Inputs:
@@ -73,13 +75,11 @@ def crovisier(glong, glat, vlsr, oortA=15.3, corrected=False):
             LSR velocity (km/s)
         oortA :: scalar
             Oort's A constant (km/s/kpc)
-        corrected :: boolean
-            If True, apply correction to mom1_distance
 
     Returns: params, errors, vlsr_rms
         params :: 1-D array of scalars
             The least-squares optimal values for
-                mom1_abs_z :: first moment of the |z| distribution (pc)
+                mom1_abs_z :: first raw moment of the |z| distribution (pc)
                 Usun, Vsun, Wsun :: solar motion w.r.t. LSR (km/s)
         errors :: 1-D array of scalars
             Standard deviations
@@ -89,28 +89,97 @@ def crovisier(glong, glat, vlsr, oortA=15.3, corrected=False):
 
     # Cost function
     def loss(params):
-        sigma_z, Usun, Vsun, Wsun = params
-        mom1_distance = (
-            np.sqrt(2.0 / np.pi) * sigma_z / np.sin(np.abs(np.deg2rad(glat)))
-        )
-        if corrected:
-            mom1_distance *= 2.0
-        mom1_vlsr = calc_vlsr(
+        mom1_abs_z, Usun, Vsun, Wsun = params
+        mom1_distance = mom1_abs_z / np.sin(np.abs(np.deg2rad(glat)))
+        model_vlsr = calc_vlsr(
             glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, oortA=oortA
         )
-        return vlsr - mom1_vlsr
+        return vlsr - model_vlsr
 
     # optimize
     x0 = (100.0, 0.0, 0.0, 0.0)
-    params, pcov, *_ = leastsq(loss, x0=x0, full_output=True)
+    params, pcov, *_ = optimize.leastsq(loss, x0=x0, full_output=True)
     errors = np.sqrt(np.diag(pcov))
 
     mom1_abs_z, Usun, Vsun, Wsun = params
     mom1_distance = mom1_abs_z / np.sin(np.abs(np.deg2rad(glat)))
-    if corrected:
-        mom1_distance *= 2.0
     model_vlsr = calc_vlsr(
         glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, oortA=oortA
+    )
+    vlsr_rms = np.sqrt(np.mean((vlsr - model_vlsr) ** 2.0))
+
+    return params, errors, vlsr_rms
+
+
+def leastsq(
+    glong,
+    glat,
+    vlsr,
+    R0=8.1660,
+    a2=0.977,
+    a3=1.623,
+):
+    """
+    Estimate the ratio of the third raw moment to the second raw moment of the
+    |z| distribution of some clouds using a least-squares method.
+
+    Inputs:
+        glong :: 1-D array of scalars
+            Galactic longitude (deg)
+        glat :: 1-D array of scalars
+            Galatic latitude (deg)
+        vlsr :: 1-D array of scalars
+            LSR velocity (km/s)
+        R0 :: scalar (kpc)
+            Solar Galactocentric radius
+        a2, a3 :: scalar
+            Parameters that define rotation curve
+
+    Returns: params, errors, vlsr_rms
+        params :: 1-D array of scalars
+            The least-squares optimal values for
+                mom3_mom2_abs_z_ratio :: ratio of third to second raw moments of the |z| distribution (pc)
+                Usun, Vsun, Wsun :: solar motion w.r.t. LSR (km/s)
+        errors :: 1-D array of scalars
+            Standard deviations
+        vlsr_rms :: scalar
+            The rms LSR velocity error
+    """
+
+    # Cost function
+    def loss(params):
+        mom3_mom2_abs_z_ratio, Usun, Vsun, Wsun = params
+        mom1_distance = mom3_mom2_abs_z_ratio / np.sin(np.abs(np.deg2rad(glat)))
+        model_vlsr = reid19_vlsr(
+            glong,
+            glat,
+            mom1_distance / 1000.0,
+            R0=R0,
+            a2=a2,
+            a3=a3,
+            Usun=Usun,
+            Vsun=Vsun,
+            Wsun=Wsun,
+        )
+        return vlsr - model_vlsr
+
+    # optimize
+    x0 = (100.0, 0.0, 0.0, 0.0)
+    params, pcov, *_ = optimize.leastsq(loss, x0=x0, full_output=True)
+    errors = np.sqrt(np.diag(pcov))
+
+    mom3_mom2_abs_z_ratio, Usun, Vsun, Wsun = params
+    mom1_distance = mom3_mom2_abs_z_ratio / np.sin(np.abs(np.deg2rad(glat)))
+    model_vlsr = reid19_vlsr(
+        glong,
+        glat,
+        mom1_distance / 1000.0,
+        R0=R0,
+        a2=a2,
+        a3=a3,
+        Usun=Usun,
+        Vsun=Vsun,
+        Wsun=Wsun,
     )
     vlsr_rms = np.sqrt(np.mean((vlsr - model_vlsr) ** 2.0))
 
