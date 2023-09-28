@@ -102,14 +102,17 @@ def crovisier(glong, glat, vlsr, oortA=15.3):
     # optimize
     x0 = (100.0, 0.0, 0.0, 0.0, 0.0)
     params, pcov, *_ = optimize.leastsq(loss, x0=x0, full_output=True)
-    errors = np.sqrt(np.diag(pcov))
 
+    # residuals
     mom1_abs_z, Usun, Vsun, Wsun, glong0 = params
     mom1_distance = mom1_abs_z / np.sin(np.abs(np.deg2rad(glat)))
     model_vlsr = calc_vlsr(
         glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, glong0, oortA=oortA
     )
     vlsr_rms = np.sqrt(np.mean((vlsr - model_vlsr) ** 2.0))
+
+    # calculate errors
+    errors = vlsr_rms * np.sqrt(np.diag(pcov))
 
     return params, errors, vlsr_rms
 
@@ -169,8 +172,8 @@ def leastsq(
     # optimize
     x0 = (100.0, 0.0, 0.0, 0.0)
     params, pcov, *_ = optimize.leastsq(loss, x0=x0, full_output=True)
-    errors = np.sqrt(np.diag(pcov))
 
+    # residuals
     mom3_mom2_abs_z_ratio, Usun, Vsun, Wsun = params
     mom1_distance = mom3_mom2_abs_z_ratio / np.sin(np.abs(np.deg2rad(glat)))
     model_vlsr = reid19_vlsr(
@@ -185,5 +188,8 @@ def leastsq(
         Wsun=Wsun,
     )
     vlsr_rms = np.sqrt(np.mean((vlsr - model_vlsr) ** 2.0))
+
+    # calculate errors
+    errors = vlsr_rms * np.sqrt(np.diag(pcov))
 
     return params, errors, vlsr_rms

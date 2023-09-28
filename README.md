@@ -95,8 +95,8 @@ params, errors, vlsr_rms = crovisier(
 # params contains least-squares fit for
 # (mom1_abs_z [pc], Usun [km/s], Vsun [km/s], Wsun [km/s], nodal_deviation [deg])
 print(params) # [155.99048541  -0.46926453  -0.68168983   0.6155149   -1.51844122]
-# errors contains the standard deviations
-print(errors) # [1.06514109 0.06694289 0.06726067 0.1383006  0.19316997]
+# errors contains the parameter standard deviation estimates
+print(errors) # [5.89442259 0.37045768 0.37221625 0.76534666 1.06899023]
 # vlsr_rms is the rms LSR velocity residual (km/s)
 print(vlsr_rms) # 5.533935952644442
 
@@ -122,9 +122,9 @@ params, errors, vlsr_rms = leastsq(
     a3 = truths['a3'], # rotation curve parameter
 )
 # params contains least-squares fit for (mom3_mom2_abs_z_ratio [pc], Usun [km/s], Vsun [km/s], Wsun [km/s])
-print(params) # array([160.1175338 ,  10.75369242,  15.7962179 ,   7.09344625])
-# errors contains the standard deviations
-print(errors) # array([1.08453171, 0.06694472, 0.06729067, 0.13826084])
+print(params) # [160.1175338 ,  10.75369242,  15.7962179 ,   7.09344625]
+# errors contains the standard deviation estimates
+print(errors) # [5.95666678 0.36768626 0.36958631 0.75938191]
 # vlsr_rms is the rms LSR velocity residual (km/s)
 print(vlsr_rms) # 5.492385979515315
 
