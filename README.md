@@ -85,11 +85,13 @@ yields an incorrect result (the first raw moment of the vertical distribution)
 when the sample is truncated in Galactic latitude.
 
 ```python
+import numpy as np
 from kinematic_scaleheight.leastsq import crovisier
 params, errors, vlsr_rms = crovisier(
     glong, # Galactic longitude of clouds (deg)
     glat, # Galactic latitude of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
+    np.ones_like(vlsr), # LSR velocity measurement uncertainty (km/s)
     oortA = 15.3, # Oort's A constant (km/s/kpc)
 )
 # params contains least-squares fit for
@@ -117,6 +119,7 @@ params, errors, vlsr_rms = leastsq(
     glong, # Galactic longitude of clouds (deg)
     glat, # Galactic latitude of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
+    np.ones_like(vlsr), # LSR velocity measurement uncertainty (km/s)
     R0 = truths['R0'], # Galactocentric radius of the Sun (kpc)
     a2 = truths['a2'], # rotation curve parameter
     a3 = truths['a3'], # rotation curve parameter
