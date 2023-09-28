@@ -63,7 +63,7 @@ def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, glong0, oortA=15.3):
     return vlsr
 
 
-def crovisier(glong, glat, vlsr, e_vlsr, oortA=15.3):
+def crovisier(glong, glat, vlsr, oortA=15.3):
     """
     Estimate the first raw moment of the |z| distribution of some clouds using
     the least-squares method of Crovisier (1978).
@@ -73,8 +73,8 @@ def crovisier(glong, glat, vlsr, e_vlsr, oortA=15.3):
             Galactic longitude (deg)
         glat :: 1-D array of scalars
             Galatic latitude (deg)
-        vlsr, e_vlsr :: 1-D arrays of scalars
-            LSR velocity and uncertainties (km/s)
+        vlsr :: 1-D array of scalars
+            LSR velocity (km/s)
         oortA :: scalar
             Oort's A constant (km/s/kpc)
 
@@ -97,7 +97,7 @@ def crovisier(glong, glat, vlsr, e_vlsr, oortA=15.3):
         model_vlsr = calc_vlsr(
             glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, glong0, oortA=oortA
         )
-        return (vlsr - model_vlsr) / e_vlsr
+        return vlsr - model_vlsr
 
     # optimize
     x0 = (100.0, 0.0, 0.0, 0.0, 0.0)
@@ -118,7 +118,6 @@ def leastsq(
     glong,
     glat,
     vlsr,
-    e_vlsr,
     R0=8.1660,
     a2=0.977,
     a3=1.623,
@@ -132,8 +131,8 @@ def leastsq(
             Galactic longitude (deg)
         glat :: 1-D array of scalars
             Galatic latitude (deg)
-        vlsr, e_vlsr :: 1-D arrays of scalars
-            LSR velocity and uncertainties (km/s)
+        vlsr :: 1-D array of scalars
+            LSR velocity (km/s)
         R0 :: scalar (kpc)
             Solar Galactocentric radius
         a2, a3 :: scalar
@@ -165,7 +164,7 @@ def leastsq(
             Vsun=Vsun,
             Wsun=Wsun,
         )
-        return (vlsr - model_vlsr) / e_vlsr
+        return vlsr - model_vlsr
 
     # optimize
     x0 = (100.0, 0.0, 0.0, 0.0)
