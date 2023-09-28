@@ -92,15 +92,16 @@ params, errors, vlsr_rms = crovisier(
     vlsr, # LSR velocities of clouds (km/s)
     oortA = 15.3, # Oort's A constant (km/s/kpc)
 )
-# params contains least-squares fit for (mom1_abs_z [pc], Usun [km/s], Vsun [km/s], Wsun [km/s])
-print(params) # [155.70584276  -0.47117138  -0.70529303   0.6415374 ]
+# params contains least-squares fit for
+# (mom1_abs_z [pc], Usun [km/s], Vsun [km/s], Wsun [km/s], nodal_deviation [deg])
+print(params) # [155.99048541  -0.46926453  -0.68168983   0.6155149   -1.51844122]
 # errors contains the standard deviations
-print(errors) # [1.06470679 0.06694245 0.0671935  0.1382609 ]
+print(errors) # [1.06514109 0.06694289 0.06726067 0.1383006  0.19316997]
 # vlsr_rms is the rms LSR velocity residual (km/s)
-print(vlsr_rms) # 5.545071292001762
+print(vlsr_rms) # 5.533935952644442
 
 print(f"Expected: {truths['mom1_abs_z']}") # Expected: 79.78845608028654
-print(f"Result: {params[0]}") # Result: 155.70584275602502
+print(f"Result: {params[0]}") # Result: 155.99048540550126
 ```
 
 ### Corrected Least Squares
@@ -108,6 +109,7 @@ print(f"Result: {params[0]}") # Result: 155.70584275602502
 The function `leastsq` corrects the Crovisier (1978) error by performing a
 similar analysis and returning the actual measurable quantity: the
 ratio between the third and second raw moments of the vertical distribution.
+This method also uses an updated, non-local Galactic rotation model.
 
 ```python
 from kinematic_scaleheight.leastsq import leastsq

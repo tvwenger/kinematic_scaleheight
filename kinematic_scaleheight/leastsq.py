@@ -30,7 +30,7 @@ from scipy import optimize
 from kinematic_scaleheight.rotation import reid19_vlsr
 
 
-def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, oortA=15.3):
+def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, glong0, oortA=15.3):
     """
     Use Oort's A constant to estimate LSR velocity in the
     solar neighborhood.
@@ -44,6 +44,8 @@ def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, oortA=15.3):
             Distance (kpc)
         Usun, Vsun, Wsun :: scalars
             Solar motion w.r.t. LSR (km/s)
+        glong0 :: scalar (deg)
+            Nodal deviation
         oortA :: scalar
             Oort's A constant (km/s/kpc)
 
@@ -53,10 +55,10 @@ def calc_vlsr(glong, glat, distance, Usun, Vsun, Wsun, oortA=15.3):
     """
     cos_glong = np.cos(np.deg2rad(glong))
     sin_glong = np.sin(np.deg2rad(glong))
-    sin_2glong = np.sin(2.0 * np.deg2rad(glong))
+    sin_2glong_offset = np.sin(2.0 * np.deg2rad(glong - glong0))
     cos_glat = np.cos(np.deg2rad(glat))
     sin_glat = np.sin(np.deg2rad(glat))
-    vlsr = distance * oortA * sin_2glong * cos_glat**2.0
+    vlsr = distance * oortA * sin_2glong_offset * cos_glat**2.0
     vlsr += (Usun * cos_glong + Vsun * sin_glong) * cos_glat + Wsun * sin_glat
     return vlsr
 
@@ -81,6 +83,7 @@ def crovisier(glong, glat, vlsr, oortA=15.3):
             The least-squares optimal values for
                 mom1_abs_z :: first raw moment of the |z| distribution (pc)
                 Usun, Vsun, Wsun :: solar motion w.r.t. LSR (km/s)
+                glong0 :: Nodal deviation (deg)
         errors :: 1-D array of scalars
             Standard deviations
         vlsr_rms :: scalar
@@ -89,22 +92,22 @@ def crovisier(glong, glat, vlsr, oortA=15.3):
 
     # Cost function
     def loss(params):
-        mom1_abs_z, Usun, Vsun, Wsun = params
+        mom1_abs_z, Usun, Vsun, Wsun, glong0 = params
         mom1_distance = mom1_abs_z / np.sin(np.abs(np.deg2rad(glat)))
         model_vlsr = calc_vlsr(
-            glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, oortA=oortA
+            glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, glong0, oortA=oortA
         )
         return vlsr - model_vlsr
 
     # optimize
-    x0 = (100.0, 0.0, 0.0, 0.0)
+    x0 = (100.0, 0.0, 0.0, 0.0, 0.0)
     params, pcov, *_ = optimize.leastsq(loss, x0=x0, full_output=True)
     errors = np.sqrt(np.diag(pcov))
 
-    mom1_abs_z, Usun, Vsun, Wsun = params
+    mom1_abs_z, Usun, Vsun, Wsun, glong0 = params
     mom1_distance = mom1_abs_z / np.sin(np.abs(np.deg2rad(glat)))
     model_vlsr = calc_vlsr(
-        glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, oortA=oortA
+        glong, glat, mom1_distance / 1000.0, Usun, Vsun, Wsun, glong0, oortA=oortA
     )
     vlsr_rms = np.sqrt(np.mean((vlsr - model_vlsr) ** 2.0))
 
