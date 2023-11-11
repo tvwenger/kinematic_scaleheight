@@ -402,13 +402,14 @@ class BaseModel:
                         alpha=0.1,
                         markersize=1,
                     )
-            ax.plot(
-                truths["distance"],
-                self.wrap_glong,
-                "r.",
-                markersize=1,
-                label="Truth",
-            )
+            if truths is not None:
+                ax.plot(
+                    truths["distance"],
+                    self.wrap_glong,
+                    "r.",
+                    markersize=1,
+                    label="Truth",
+                )
             ax.set_ylim(-200.0, 200.0)
             ax.set_xlabel(r"Distance (pc)")
             ax.set_ylabel(r"Galactic Longitude (deg)")
