@@ -22,13 +22,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Trey Wenger - June 2023
+Trey Wenger - November 2023 - add outlier component, remove d_max,
+    remove FullDistanceModel
 """
 
 import os
 import pickle
 import numpy as np
 import pymc as pm
-import pytensor.tensor as pt
 import matplotlib.pyplot as plt
 import corner
 
@@ -47,7 +48,7 @@ class BaseModel:
         glong,
         glat,
         vlsr,
-        prior_vlsr_err=10.0,
+        prior_outlier_vlsr_sigma,
     ):
         """
         Initialize a new BaseModel instance.
@@ -59,8 +60,8 @@ class BaseModel:
                 Galactic latitude of clouds
             vlsr :: 1-D array of scalars (km/s)
                 LSR velocities of clouds
-            prior_vlsr_err :: scalar (km/s)
-                Width of half-normal distribution prior on vlsr_err
+            prior_outlier_vlsr_sigma :: scalar (km/s)
+                Width of half-normal distribution prior on outlier_vlsr_sigma
 
         Returns: model
             model :: BaseModel
@@ -86,38 +87,45 @@ class BaseModel:
         # and covariance for the rotation curve parameters
         fname = os.path.join(os.path.dirname(__file__), "data/reid19_mv.pkl")
         with open(fname, "rb") as f:
-            self.reid19_mean, self.reid19_cov = pickle.load(f)
+            reid19_mean, reid19_cov = pickle.load(f)
 
-    def plot_predictive(self, predtype, num, truths=None, plot_prefix=""):
+        # Define model
+        with pm.Model(coords={"data": range(self.size)}) as self.model:
+            # multivariate-normal distribution in rotation curve parameters
+            # order: R0, Usun, Vsun, Wsun, a2, a3
+            _ = pm.MvNormal("rotcurve", mu=reid19_mean, cov=reid19_cov)
+
+            # outlier component
+            outlier_vlsr_sigma = pm.HalfNormal(
+                "outlier_vlsr_sigma", sigma=prior_outlier_vlsr_sigma
+            )
+            outlier_vlsr_mu = 0.0
+            self.outlier_vlsr_dist = pm.Normal.dist(
+                mu=outlier_vlsr_mu, sigma=outlier_vlsr_sigma
+            )
+
+    def vlsr_predictive(self, predtype, num, fname=None, seed=1234):
         """
-        Generate prior or posterior predictive samples and plots. The plots are:
-        name                description
-        lv_{predtype}.pdf        Longitude-velocity predictive
-        ld_{predtype}.pdf        Longitude-distance predictive
+        Generate prior or posterior predictive LSR velocity samples and plot.
 
         Inputs:
             predtype :: string
                 One of "prior" or "posterior"
             num :: integer
                 Number of predictive samples to generate
-            truths :: dictionary
-                If not None, the dictionary should include the key
-                'distance' with the true distance for each target.
-                These values are incorporated to the relevant plots.
-            plot_prefix :: string
-                Save plots with names like {plot_prefix}{name}.pdf
+            fname :: string
+                If not None, generate plot to this filename
+            seed :: integer
+                Random seed
 
-        Returns: samples, predictive
-            samples :: arviz.InferenceData
-                Prior/posterior samples
-            predictive :: arviz.InferenceData
-                Prior/posterior predictive samples
+        Returns: trace
+            trace :: arviz.InferenceData
+                Predictive samples
         """
         # prior predictive samples
         with self.model:
             if predtype == "prior":
-                trace = pm.sample_prior_predictive(samples=num)
-                samples = trace.prior
+                trace = pm.sample_prior_predictive(samples=num, random_seed=seed)
                 predictive = trace.prior_predictive
             elif predtype == "posterior":
                 # thin the posterior samples to requested sample size
@@ -126,14 +134,14 @@ class BaseModel:
                 )
                 thin = total_samples // num
                 trace = pm.sample_posterior_predictive(
-                    self.trace.sel(draw=slice(None, None, thin))
+                    self.trace.sel(draw=slice(None, None, thin)), random_seed=seed
                 )
-                samples = self.trace.posterior.sel(draw=slice(None, None, thin))
                 predictive = trace.posterior_predictive
+            else:
+                raise ValueError(f"invalid predtype {predtype}")
 
-        if "vlsr" in predictive.keys():
-            # longitude-velocity
-            fig, ax = plt.subplots()
+        if fname is not None:
+            fig, ax = plt.subplots(figsize=(6, 8))
             for chain in predictive.chain:
                 for draw in predictive.draw:
                     ax.plot(
@@ -143,41 +151,18 @@ class BaseModel:
                         alpha=0.1,
                         markersize=1,
                     )
-            ax.plot(self.vlsr, self.wrap_glong, "r.", markersize=1, label="Observed")
+            ax.plot(self.vlsr, self.wrap_glong, "r.", markersize=1, label="Data")
+            max_vlsr = np.abs(self.vlsr).max()
+            ax.set_xlim(-1.5 * max_vlsr, 1.5 * max_vlsr)
+            ax.set_ylim(-200.0, 200.0)
             ax.set_xlabel(r"$V_{\rm LSR}$ (km s$^{-1}$)")
             ax.set_ylabel(r"Galactic Longitude (deg)")
-            ax.legend(loc="best")
+            ax.legend(loc="best", fontsize=10)
             fig.tight_layout()
-            fig.savefig(f"{plot_prefix}lv_{predtype}.pdf", bbox_inches="tight")
+            fig.savefig(fname, bbox_inches="tight")
             plt.close(fig)
 
-        if "distance" in samples.keys():
-            # longitude-distance
-            fig, ax = plt.subplots()
-            for chain in predictive.chain:
-                for draw in predictive.draw:
-                    ax.plot(
-                        samples["distance"].sel(chain=chain, draw=draw),
-                        self.wrap_glong,
-                        "k.",
-                        alpha=0.1,
-                        markersize=1,
-                    )
-            if truths is not None:
-                ax.plot(
-                    truths["distance"],
-                    self.wrap_glong,
-                    "r.",
-                    markersize=1,
-                    label="Truth",
-                )
-                ax.legend(loc="best")
-            ax.set_xlabel(r"Distance (pc)")
-            ax.set_ylabel(r"Galactic Longitude (deg)")
-            fig.tight_layout()
-            fig.savefig(f"{plot_prefix}ld_{predtype}.pdf", bbox_inches="tight")
-            plt.close(fig)
-        return samples, predictive
+        return trace
 
     def sample(
         self,
@@ -187,6 +172,7 @@ class BaseModel:
         chains=4,
         init="adapt_diag",
         target_accept=0.8,
+        seed=1234,
     ):
         """
         Generate posterior samples of the model.
@@ -204,6 +190,8 @@ class BaseModel:
                 Initialization method.
             target_accept :: scalar
                 Target accept fraction
+            seed :: integer
+                Random seed
 
         Returns: Nothing
         """
@@ -216,6 +204,7 @@ class BaseModel:
                 cores=cores,
                 chains=chains,
                 target_accept=target_accept,
+                random_seed=seed,
             )
         print(
             pm.summary(
@@ -224,15 +213,15 @@ class BaseModel:
             )
         )
 
-    def plot_corner(self, truths=None, plot_prefix=""):
+    def plot_corner(self, truths=None, fname="corner.pdf"):
         """
         Generate corner plot of posterior samples.
 
         Inputs:
             truths :: dictionary
-                Truths dictionary
-            plot_prefix :: string
-                Save plot with name like {plot_prefix}corner.pdf
+                Truths dictionary. If None, do not identify truths.
+            fname :: string
+                Plot filename
 
         Returns: Nothing
         """
@@ -249,10 +238,186 @@ class BaseModel:
                 if "shape" in self.var_names
                 else truths["mom3_mom2_abs_z_ratio"],
                 truths["vlsr_err"],
+                1.0 - truths["outlier_frac"],
+                truths["outlier_frac"],
+                truths["outlier_vlsr_sigma"],
             ]
         fig = corner.corner(self.trace, var_names=self.var_names, truths=truth_vals)
-        fig.savefig(f"{plot_prefix}corner.pdf", bbox_inches="tight")
+        fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)
+
+    def outlier_predictive(self, num, truths=None, fname=None, prob=0.5, seed=1234):
+        """
+        Draw posterior samples for latent outlier classification.
+
+        Inputs:
+            num :: integer
+                Number of predictive samples to generate
+            truths :: dictionary
+                Truths dictionary. If None, do not identify truths
+            fname :: string
+                If not None, generate longitude-velocity diagram and
+                identify outliers.
+            prob :: scalar
+                Outliers are classified where the outlier likelihood exceeds
+                this probability.
+            seed :: integer
+                Random seed
+        Returns: trace
+            trace :: arviz.InferenceData
+                Posterior predictive
+        """
+        # add component likelihood to model
+        if "outlier" not in self.model.named_vars:
+            with self.model:
+                model_logp = pm.math.log(self.model.w[0]) + pm.logp(
+                    self.model_vlsr_dist, self.vlsr
+                )
+                outlier_logp = pm.math.log(self.model.w[1]) + pm.logp(
+                    self.outlier_vlsr_dist, self.vlsr
+                )
+                log_probs = pm.math.concatenate([[model_logp], [outlier_logp]], axis=0)
+                _ = pm.Categorical("outlier", logit_p=log_probs.T, dims="data")
+
+        # sample
+        with self.model:
+            # thin the posterior samples to requested sample size
+            total_samples = len(self.trace.posterior.chain) * len(
+                self.trace.posterior.draw
+            )
+            thin = total_samples // num
+            trace = pm.sample_posterior_predictive(
+                self.trace.sel(draw=slice(None, None, thin)),
+                var_names=["outlier"],
+                random_seed=seed,
+            )
+
+        if fname is not None:
+            # identify outliers
+            outlier = (
+                (trace.posterior_predictive.mean(("chain", "draw")) > prob)
+                .to_array()
+                .data
+            )[0]
+            fig, ax = plt.subplots(figsize=(6, 8))
+            if truths is None:
+                ax.plot(self.vlsr, self.wrap_glong, "k.", label="Data")
+            else:
+                ax.plot(
+                    self.vlsr[~truths["outlier"]],
+                    self.wrap_glong[~truths["outlier"]],
+                    "k.",
+                    label="Non-outlier Data",
+                )
+                ax.plot(
+                    self.vlsr[truths["outlier"]],
+                    self.wrap_glong[truths["outlier"]],
+                    "r.",
+                    label="Outlier Data",
+                )
+            ax.plot(
+                self.vlsr[outlier],
+                self.wrap_glong[outlier],
+                "bo",
+                label="Identified Outliers",
+                alpha=0.5,
+            )
+            max_vlsr = np.abs(self.vlsr).max()
+            ax.set_xlim(-1.5 * max_vlsr, 1.5 * max_vlsr)
+            ax.set_ylim(-200.0, 200.0)
+            ax.set_xlabel(r"$V_{\rm LSR}$ (km s$^{-1}$)")
+            ax.set_ylabel(r"Galactic Longitude (deg)")
+            ax.legend(loc="best", fontsize=10)
+            fig.tight_layout()
+            fig.savefig(fname, bbox_inches="tight")
+            plt.close(fig)
+
+        return trace
+
+    def distance_predictive(self, num, truths=None, fname=None, seed=1234):
+        """
+        Draw posterior samples for latent distances assuming a distribution.
+
+        Inputs:
+            num :: integer
+                Number of predictive samples to generate
+            truths :: dictionary
+                Truths dictionary. If None, do not identify truths
+            fname :: string
+                If not None, generate longitude-distance diagram
+            seed :: integer
+                Random seed
+        Returns: trace
+            trace :: arviz.InferenceData
+                Posterior predictive
+        """
+        # add component likelihood to model
+        if "distance" not in self.model.named_vars:
+            with self.model:
+                if self.distribution == "gaussian":
+                    dist_sigma = self.model.shape / pm.math.sin(
+                        pm.math.abs(np.deg2rad(self.glat))
+                    )
+                    _ = Chi("distance", df=3.0, sigma=dist_sigma, dims="data")
+                elif self.distribution == "exponential":
+                    dist_beta = (
+                        pm.math.sin(pm.math.abs(np.deg2rad(self.glat)))
+                        / self.model.shape
+                    )
+                    _ = pm.Gamma("distance", alpha=3.0, beta=dist_beta, dims="data")
+                elif self.distribution == "rectangular":
+                    dist_scale = self.model.shape / pm.math.sin(
+                        pm.math.abs(np.deg2rad(self.glat))
+                    )
+                    distance3 = pm.Uniform(
+                        "distance3", lower=0.0, upper=dist_scale**3.0, dims="data"
+                    )
+                    _ = pm.Deterministic("distance", distance3 ** (1 / 3), dims="data")
+                else:
+                    raise NotImplementedError(f"{self.distribution} not available")
+
+        # sample
+        with self.model:
+            # thin the posterior samples to requested sample size
+            total_samples = len(self.trace.posterior.chain) * len(
+                self.trace.posterior.draw
+            )
+            thin = total_samples // num
+            trace = pm.sample_posterior_predictive(
+                self.trace.sel(draw=slice(None, None, thin)),
+                var_names=["distance"],
+                random_seed=seed,
+            )
+
+        if fname is not None:
+            fig, ax = plt.subplots(figsize=(6, 8))
+            for chain in trace.posterior_predictive.chain:
+                for draw in trace.posterior_predictive.draw:
+                    ax.plot(
+                        trace.posterior_predictive["distance"].sel(
+                            chain=chain, draw=draw
+                        ),
+                        self.wrap_glong,
+                        ".",
+                        alpha=0.1,
+                        markersize=1,
+                    )
+            ax.plot(
+                truths["distance"],
+                self.wrap_glong,
+                "r.",
+                markersize=1,
+                label="Truth",
+            )
+            ax.set_ylim(-200.0, 200.0)
+            ax.set_xlabel(r"Distance (pc)")
+            ax.set_ylabel(r"Galactic Longitude (deg)")
+            ax.legend(loc="best", fontsize=10)
+            fig.tight_layout()
+            fig.savefig(fname, bbox_inches="tight")
+            plt.close(fig)
+
+        return trace
 
 
 class MomentRatioModel(BaseModel):
@@ -268,6 +433,7 @@ class MomentRatioModel(BaseModel):
         vlsr,
         prior_mom3_mom2_abs_z_ratio=100.0,
         prior_vlsr_err=10.0,
+        prior_outlier_vlsr_sigma=50.0,
     ):
         """
         Initialize a new MomentRatioModel instance.
@@ -284,21 +450,24 @@ class MomentRatioModel(BaseModel):
                 moment ratio.
             prior_vlsr_err :: scalar (km/s)
                 Width of half-normal distribution prior on vlsr_err
+            prior_outlier_vlsr_sigma :: scalar (km/s)
+                Width of half-normal distribution prior on outlier_vlsr_sigma
 
         Returns: model
             model :: MomentRatioModel
                 New model instance
         """
-        super().__init__(glong, glat, vlsr, prior_vlsr_err=prior_vlsr_err)
-        self.var_names = ["rotcurve", "mom3_mom2_abs_z_ratio", "vlsr_err"]
+        super().__init__(glong, glat, vlsr, prior_outlier_vlsr_sigma)
+        self.var_names = [
+            "rotcurve",
+            "mom3_mom2_abs_z_ratio",
+            "vlsr_err",
+            "w",
+            "outlier_vlsr_sigma",
+        ]
 
         # Define model
-        with pm.Model() as self.model:
-            # multivariate-normal distribution in rotation curve parameters
-            R0, Usun, Vsun, Wsun, a2, a3 = pm.MvNormal(
-                "rotcurve", mu=self.reid19_mean, cov=self.reid19_cov
-            )
-
+        with self.model:
             # moment ratio
             mom3_mom2_abs_z_ratio = pm.Gamma(
                 "mom3_mom2_abs_z_ratio",
@@ -306,10 +475,11 @@ class MomentRatioModel(BaseModel):
                 beta=1.0 / prior_mom3_mom2_abs_z_ratio,
             )
 
-            # assign distance to expectation value
-            distance = pm.Deterministic(
-                "distance",
+            # distance expectation
+            mom0_distance = pm.Deterministic(
+                "mom0_distance",
                 mom3_mom2_abs_z_ratio / pm.math.sin(pm.math.abs(np.deg2rad(glat))),
+                dims="data",
             )
 
             # velocity
@@ -317,21 +487,77 @@ class MomentRatioModel(BaseModel):
             vlsr_mu = reid19_vlsr(
                 glong,
                 glat,
-                distance / 1000.0,  # kpc
-                R0=R0,
-                a2=a2,
-                a3=a3,
-                Usun=Usun,
-                Vsun=Vsun,
-                Wsun=Wsun,
+                mom0_distance / 1000.0,  # kpc
+                R0=self.model.rotcurve[0],
+                Usun=self.model.rotcurve[1],
+                Vsun=self.model.rotcurve[2],
+                Wsun=self.model.rotcurve[3],
+                a2=self.model.rotcurve[4],
+                a3=self.model.rotcurve[5],
             )
-            _ = pm.Normal("vlsr", mu=vlsr_mu, sigma=vlsr_err, observed=vlsr)
+            self.model_vlsr_dist = pm.Normal.dist(mu=vlsr_mu, sigma=vlsr_err)
+
+            # observed mixture
+            w = pm.Dirichlet("w", a=np.ones(2))
+            _ = pm.Mixture(
+                "vlsr",
+                w=w,
+                comp_dists=[self.model_vlsr_dist, self.outlier_vlsr_dist],
+                observed=vlsr,
+                dims="data",
+            )
+
+    def distance_predictive(
+        self, num, distribution="gaussian", truths=None, fname=None, seed=1234
+    ):
+        """
+        Draw posterior samples for latent distances assuming a distribution.
+
+        Inputs:
+            num :: integer
+                Number of predictive samples to generate
+            distribution :: string
+                One of "gaussian", "exponential", or "rectangular", the
+                assumed vertical distribution of clouds
+            truths :: dictionary
+                Truths dictionary. If None, do not identify truths
+            fname :: string
+                If not None, generate longitude-distance diagram
+            seed :: integer
+                Random seed
+
+        Returns: trace
+            trace :: arviz.InferenceData
+                Posterior predictive
+        """
+        self.distribution = distribution
+
+        # add shape parameter to model
+        if "shape" not in self.model.named_vars:
+            with self.model:
+                if distribution == "gaussian":
+                    _ = pm.Deterministic(
+                        "shape",
+                        self.model.mom3_mom2_abs_z_ratio / (2.0 * np.sqrt(2.0 / np.pi)),
+                    )
+                elif distribution == "exponential":
+                    _ = pm.Deterministic(
+                        "shape", self.model.mom3_mom2_abs_z_ratio / 3.0
+                    )
+                elif distribution == "rectangular":
+                    _ = pm.Deterministic(
+                        "shape", self.model.mom3_mom2_abs_z_ratio * 4.0 / 3.0
+                    )
+                else:
+                    raise NotImplementedError(f"{distribution} not available")
+
+        return super().distance_predictive(num, truths=truths, fname=fname, seed=seed)
 
 
-class MarginalDistanceModel(BaseModel):
+class ShapeModel(BaseModel):
     """
     Use MCMC to infer the shape parameter for a given vertical distribution
-    of clouds, but marginalize over distance before sampling.
+    of clouds, marginaling over latent distances.
     """
 
     def __init__(
@@ -342,6 +568,7 @@ class MarginalDistanceModel(BaseModel):
         distribution="gaussian",
         prior_shape=100.0,
         prior_vlsr_err=10.0,
+        prior_outlier_vlsr_sigma=50.0,
     ):
         """
         Initialize a new model.
@@ -364,21 +591,19 @@ class MarginalDistanceModel(BaseModel):
                     Rectangular :: half-width
             prior_vlsr_err :: scalar (km/s)
                 Width of half-normal distribution prior on vlsr_err
+            prior_outlier_vlsr_sigma :: scalar (km/s)
+                Width of half-normal distribution prior on outlier_vlsr_sigma
 
         Returns: model
             model :: MarginalDistanceModel
                 New model instance
         """
-        super().__init__(glong, glat, vlsr, prior_vlsr_err=prior_vlsr_err)
-        self.var_names = ["rotcurve", "shape", "vlsr_err"]
+        super().__init__(glong, glat, vlsr, prior_outlier_vlsr_sigma)
+        self.var_names = ["rotcurve", "shape", "vlsr_err", "w", "outlier_vlsr_sigma"]
+        self.distribution = distribution
 
         # Define model
-        with pm.Model() as self.model:
-            # multivariate-normal distribution in rotation curve parameters
-            R0, Usun, Vsun, Wsun, a2, a3 = pm.MvNormal(
-                "rotcurve", mu=self.reid19_mean, cov=self.reid19_cov
-            )
-
+        with self.model:
             # shape parameter
             shape = pm.Gamma("shape", alpha=2.0, beta=1.0 / prior_shape)
 
@@ -391,10 +616,11 @@ class MarginalDistanceModel(BaseModel):
             else:
                 raise NotImplementedError(f"{distribution} not available")
 
-            # assign distance to expectation value
-            distance = pm.Deterministic(
-                "distance",
+            # distance expectation value
+            mom0_distance = pm.Deterministic(
+                "mom0_distance",
                 mom3_mom2_abs_z_ratio / pm.math.sin(pm.math.abs(np.deg2rad(glat))),
+                dims="data",
             )
 
             # velocity
@@ -402,116 +628,22 @@ class MarginalDistanceModel(BaseModel):
             vlsr_mu = reid19_vlsr(
                 glong,
                 glat,
-                distance / 1000.0,  # kpc
-                R0=R0,
-                a2=a2,
-                a3=a3,
-                Usun=Usun,
-                Vsun=Vsun,
-                Wsun=Wsun,
+                mom0_distance / 1000.0,  # kpc
+                R0=self.model.rotcurve[0],
+                Usun=self.model.rotcurve[1],
+                Vsun=self.model.rotcurve[2],
+                Wsun=self.model.rotcurve[3],
+                a2=self.model.rotcurve[4],
+                a3=self.model.rotcurve[5],
             )
-            _ = pm.Normal("vlsr", mu=vlsr_mu, sigma=vlsr_err, observed=vlsr)
+            self.model_vlsr_dist = pm.Normal.dist(mu=vlsr_mu, sigma=vlsr_err)
 
-
-class FullDistanceModel(BaseModel):
-    """
-    Use MCMC to infer the shape parameter for a given vertical distribution
-    of clouds without marginalizing over distance before sampling.
-    """
-
-    def __init__(
-        self,
-        glong,
-        glat,
-        vlsr,
-        distribution="gaussian",
-        prior_shape=100.0,
-        prior_vlsr_err=10.0,
-        d_max=5000.0,
-    ):
-        """
-        Initialize a new model.
-
-        Inputs:
-            glong :: 1-D array of scalars (deg)
-                Galactic longitude of clouds
-            glat :: 1-D array of scalars (deg)
-                Galactic latitude of clouds
-            vlsr :: 1-D array of scalars (km/s)
-                LSR velocities of clouds
-            distribution :: string
-                One of "gaussian", "exponential", or "rectangular", the
-                assumed vertical distribution of clouds
-            prior_shape :: scalar (pc)
-                Mode of the k=2 gamma distribution prior on the
-                shape of the vertical distribution of clouds.
-                    Gaussian :: standard deviation
-                    Exponential :: scale height
-                    Rectangular :: half-width
-            prior_vlsr_err :: scalar (km/s)
-                Width of half-normal distribution prior on vlsr_err
-            d_max :: scalar (pc)
-                Truncate distance distribution at this distance
-
-        Returns: model
-            model :: FullDistanceModel
-                New model instance
-        """
-        super().__init__(glong, glat, vlsr, prior_vlsr_err=prior_vlsr_err)
-        self.var_names = ["rotcurve", "shape", "vlsr_err"]
-
-        # Define model
-        with pm.Model() as self.model:
-            # multivariate-normal distribution in rotation curve parameters
-            R0, Usun, Vsun, Wsun, a2, a3 = pm.MvNormal(
-                "rotcurve", mu=self.reid19_mean, cov=self.reid19_cov
+            # observed mixture
+            w = pm.Dirichlet("w", a=np.ones(2))
+            _ = pm.Mixture(
+                "vlsr",
+                w=w,
+                comp_dists=[self.model_vlsr_dist, self.outlier_vlsr_dist],
+                observed=vlsr,
+                dims="data",
             )
-
-            # shape parameter
-            shape = pm.Gamma("shape", alpha=2.0, beta=1.0 / prior_shape)
-
-            if distribution == "gaussian":
-                dist_sigma = shape / pm.math.sin(pm.math.abs(np.deg2rad(glat)))
-                distance = pm.Truncated(
-                    "distance",
-                    Chi.dist(df=3.0, sigma=dist_sigma),
-                    upper=d_max,
-                    shape=(self.size,),
-                )
-            elif distribution == "exponential":
-                # Need to hack this because of bug in pymc: https://github.com/pymc-devs/pymc/issues/6931
-                dist_beta = pm.math.sin(pm.math.abs(np.deg2rad(glat))) / shape
-                distance_scale = pm.Truncated(
-                    "distance_scale",
-                    pm.Gamma.dist(
-                        alpha=3.0,
-                        beta=1.0,
-                    ),
-                    upper=d_max * dist_beta,
-                    shape=(self.size,),
-                )
-                distance = pm.Deterministic("distance", distance_scale / dist_beta)
-            elif distribution == "rectangular":
-                dist_scale = shape / pm.math.sin(pm.math.abs(np.deg2rad(glat)))
-                max_dist = pt.switch(dist_scale > d_max, d_max, dist_scale)
-                distance3 = pm.Uniform(
-                    "distance3", lower=0.0, upper=max_dist**3.0, shape=(self.size,)
-                )
-                distance = pm.Deterministic("distance", distance3 ** (1 / 3))
-            else:
-                raise NotImplementedError(f"{distribution} not available")
-
-            # velocity
-            vlsr_err = pm.HalfNormal("vlsr_err", sigma=prior_vlsr_err)
-            vlsr_mu = reid19_vlsr(
-                glong,
-                glat,
-                distance / 1000.0,  # kpc
-                R0=R0,
-                a2=a2,
-                a3=a3,
-                Usun=Usun,
-                Vsun=Vsun,
-                Wsun=Wsun,
-            )
-            _ = pm.Normal("vlsr", mu=vlsr_mu, sigma=vlsr_err, observed=vlsr)
