@@ -21,6 +21,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Trey Wenger - June 2023
+Trey Wenger - November 2023 - remove d_max
 """
 
 import os
@@ -36,10 +37,12 @@ def gen_synthetic_sample(
     distribution="gaussian",
     shape=100.0,
     vlsr_err=10.0,
-    d_max=1000.0,
     b_min=10.0,
     b_max=30.0,
+    outlier_vlsr_sigma=25.0,
+    outlier_frac=0.05,
     seed=1234,
+    verbose=False,
 ):
     """
     Generate a sample of synthetic observations between b_min and b_max.
@@ -57,12 +60,16 @@ def gen_synthetic_sample(
             Rectangular :: half-width
         vlsr_err :: scalar (km/s)
             Noise added to LSR velocity.
-        d_max :: scalar (pc)
-            Maximum distance
         b_min, b_max :: scalars (deg)
             Minimum and maximum absolute Galactic latitude
+        outlier_vlsr_sigma :: scalar (km/s)
+            Width of the outlier LSR velocity distribution
+        outlier_frac :: scalar
+            Fraction of sample that is drawn from the outlier distribution
         seed :: integer
             Random seed
+        verbose :: boolean
+            If True, print info about simulation along the way
 
     Returns: (glong, glat, vlsr, truths)
         glong, glat :: scalars (deg)
@@ -90,6 +97,12 @@ def gen_synthetic_sample(
     vlsr = np.empty(0)
     distance = np.empty(0)
 
+    # simulate clouds out to d_max >> mom1_abs_z / sin(b_min)
+    d_max = 10.0 * shape / np.sin(np.deg2rad(b_min))
+    if verbose:
+        print(f"Simulating {n} clouds up to d_max = {d_max:.3f} pc")
+
+    iteration = 0
     while len(glong) < n:
         # Heliocentric position. Draw 10x sample size
         # since we will have to throw away some
@@ -145,20 +158,38 @@ def gen_synthetic_sample(
         vlsr = np.concatenate((vlsr, new_vlsr[good]))
         distance = np.concatenate((distance, new_distance[good]))
 
+        if verbose:
+            print(
+                f"Added {good.sum()} clouds ({len(glong)}/{n}) in iteration {iteration}"
+            )
+        iteration += 1
+
     # trim to size
     glong = glong[:n]
     glat = glat[:n]
     vlsr = vlsr[:n]
     distance = distance[:n]
+    if verbose:
+        print(f"Simulation complete. Trimming sample to {n} clouds")
+
+    # replace some with outlier velocities
+    num_outliers = int(outlier_frac * n)
+    outlier = np.zeros(n, dtype=bool)
+    outlier[:num_outliers] = True
+    vlsr[:num_outliers] = rng.normal(0.0, outlier_vlsr_sigma, size=num_outliers)
 
     # store truths separately
     truths = {
         "distance": distance,
+        "outlier": outlier,
         "distribution": distribution,
         "shape": shape,
+        "d_max": d_max,
         "mom1_abs_z": mom1_abs_z,
         "mom3_mom2_abs_z_ratio": mom3_mom2_abs_z_ratio,
         "vlsr_err": vlsr_err,
+        "outlier_frac": outlier_frac,
+        "outlier_vlsr_sigma": outlier_vlsr_sigma,
         "R0": R0,
         "Usun": Usun,
         "Vsun": Vsun,
@@ -167,5 +198,4 @@ def gen_synthetic_sample(
         "a3": a3,
     }
 
-    # trim to size
-    return glong[:n], glat[:n], vlsr[:n], truths
+    return glong, glat, vlsr, truths

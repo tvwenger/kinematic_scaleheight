@@ -2,7 +2,7 @@
 Demonstrate the error of the
 [Crovisier (1978)](https://ui.adsabs.harvard.edu/abs/1978A%26A....70...43C/abstract)
 method, and use various least squares and MCMC methods to kinematically estimate the vertical
-distribution of clouds in the Galactic plane
+distribution of clouds in the Galactic plane.
 
 # Table of Contents
 - [Installation](#installation)
@@ -13,10 +13,9 @@ distribution of clouds in the Galactic plane
     - [Corrected Least Squares](#corrected-least-squares)
   - [MCMC](#mcmc)
     - [Moment Ratio](#moment-ratio)
-    - [Marginalized Distance](#marginalized-distance)
-    - [Full Distance](#full-distance)
+    - [Shape](#shape)
   - [Other Distributions](#other-distributions)
-- [Caveats](#caveats)
+  - [Model Comparison](#model-comparison)
 - [Issues and Contributing](#issues-and-contributing)
 - [License and Copyright](#license-and-copyright)
 
@@ -38,7 +37,8 @@ distribution perpendicular to the Galactic plane. The Sun is assumed to be in th
 The parameters that govern the Galactic rotation model are drawn from a multivariate normal distribution
 fit to the posterior distribution of the
 [Reid et al. (2019)](https://ui.adsabs.harvard.edu/abs/2019ApJ...885..131R/abstract)
-`A5` model.
+`A5` model. Additionally, interloping ("outlier") clouds are drawn from a broader velocity
+distribution.
 
 Available vertical distributions and their shape parameters include `gaussian` (standard deviation),
 `exponential` (scale height), and `rectangular` (half-width).
@@ -46,26 +46,48 @@ Available vertical distributions and their shape parameters include `gaussian` (
 ```python
 from kinematic_scaleheight.simulate import gen_synthetic_sample
 glong, glat, vlsr, truths = gen_synthetic_sample(
-    500, # sample size
+    300, # sample size
     distribution='gaussian', # vertical distribution shape
     shape=100.0, # shape parameter for the distribution (pc)
     vlsr_err=5.0, # random noise added to observed LSR velocities (km/s)
-    d_max=2000.0, # maximum distance of the clouds (pc)
     b_min=10.0, # minimum Galactic latitude (deg)
     b_max=90.0, # maximum Galactic latitude (deg)
+    outlier_vlsr_sigma=30.0, # width of LSR velocity distribution for outliers (km/s)
+    outlier_frac=0.1, # fraction of sample that are outliers
     seed=1234, # random seed
+    verbose=True, # print helpful information
 )
+"""
+Simulating 300 clouds up to d_max = 5758.770 pc
+Added 22 clouds (22/300) in iteration 0
+Added 19 clouds (41/300) in iteration 1
+Added 23 clouds (64/300) in iteration 2
+Added 24 clouds (88/300) in iteration 3
+Added 24 clouds (112/300) in iteration 4
+Added 23 clouds (135/300) in iteration 5
+Added 23 clouds (158/300) in iteration 6
+Added 17 clouds (175/300) in iteration 7
+Added 28 clouds (203/300) in iteration 8
+Added 23 clouds (226/300) in iteration 9
+Added 26 clouds (252/300) in iteration 10
+Added 29 clouds (281/300) in iteration 11
+Added 20 clouds (301/300) in iteration 12
+Simulation complete. Trimming sample to 300 clouds
+"""
 ```
 
 The `truths` dictionary contains the "true" parameters that were used to generate the
-simulated observations. These parameters include the true distance of each cloud,
-the passed shape parameter, the first raw moment of the `|z|` distribution,
+simulated observations. These parameters include the "true" distance of each cloud,
+a boolean flag to indicate if a data point is from the outlier population,
+the passed distribution, the passed shape parameter, the maximum distance allowed
+for the simulated clouds, the first raw moment of the `|z|` distribution,
 the ratio of the third to the second raw moments of the
-`|z|` distribution, and the "true" values for the Galactic rotation model.
+`|z|` distribution, the true LSR velocity error, the true outlier fraction and velocity
+distribution width, and the "true" values for the Galactic rotation model parameters.
 
 ```python
 print(truths.keys())
-# dict_keys(['distance', 'distribution', 'shape', 'mom1_abs_z', 'mom3_mom2_abs_z_ratio', 'vlsr_err', 'R0', 'Usun', 'Vsun', 'Wsun', 'a2', 'a3'])
+# dict_keys(['distance', 'outlier', 'distribution', 'shape', 'd_max', 'mom1_abs_z', 'mom3_mom2_abs_z_ratio', 'vlsr_err', 'outlier_frac', 'outlier_vlsr_sigma', 'R0', 'Usun', 'Vsun', 'Wsun', 'a2', 'a3'])
 ```
 
 ## Least Squares
@@ -84,24 +106,26 @@ and the shape of the vertical distribution. Therefore, the Crovisier (1978) meth
 yields an incorrect result (the first raw moment of the vertical distribution)
 when the sample is truncated in Galactic latitude.
 
+Here we drop the known outliers to test the methods.
+
 ```python
 from kinematic_scaleheight.leastsq import crovisier
 params, errors, vlsr_rms = crovisier(
-    glong, # Galactic longitude of clouds (deg)
-    glat, # Galactic latitude of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
+    glong[~truths['outlier']], # Galactic longitude of clouds (deg)
+    glat[~truths['outlier']], # Galactic latitude of clouds (deg)
+    vlsr[~truths['outlier']], # LSR velocities of clouds (km/s)
     oortA = 15.3, # Oort's A constant (km/s/kpc)
 )
 # params contains least-squares fit for
 # (mom1_abs_z [pc], Usun [km/s], Vsun [km/s], Wsun [km/s], nodal_deviation [deg])
-print(params) # [155.99048541  -0.46926453  -0.68168983   0.6155149   -1.51844122]
+print(params) # [169.01403745   0.51634831  -0.18137725  -1.05070969   1.53262918]
 # errors contains the parameter standard deviation estimates
-print(errors) # [5.89442259 0.37045768 0.37221625 0.76534666 1.06899023]
+print(errors) # [7.62922783 0.50414248 0.52096358 1.06562422 1.43799352]
 # vlsr_rms is the rms LSR velocity residual (km/s)
-print(vlsr_rms) # 5.533935952644442
+print(vlsr_rms) # 5.605146497847245
 
 print(f"Expected: {truths['mom1_abs_z']}") # Expected: 79.78845608028654
-print(f"Result: {params[0]}") # Result: 155.99048540550126
+print(f"Result: {params[0]}") # Result: 169.0140374479736
 ```
 
 ### Corrected Least Squares
@@ -111,38 +135,39 @@ similar analysis and returning the actual measurable quantity: the
 ratio between the third and second raw moments of the vertical distribution.
 This method also uses an updated, non-local Galactic rotation model.
 
+Again, we drop the known outliers to demonstrate the accuracy of the method.
+
 ```python
 from kinematic_scaleheight.leastsq import leastsq
 params, errors, vlsr_rms = leastsq(
-    glong, # Galactic longitude of clouds (deg)
-    glat, # Galactic latitude of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
+    glong[~truths['outlier']], # Galactic longitude of clouds (deg)
+    glat[~truths['outlier']], # Galactic latitude of clouds (deg)
+    vlsr[~truths['outlier']], # LSR velocities of clouds (km/s)
     R0 = truths['R0'], # Galactocentric radius of the Sun (kpc)
     a2 = truths['a2'], # rotation curve parameter
     a3 = truths['a3'], # rotation curve parameter
 )
 # params contains least-squares fit for (mom3_mom2_abs_z_ratio [pc], Usun [km/s], Vsun [km/s], Wsun [km/s])
-print(params) # [160.1175338 ,  10.75369242,  15.7962179 ,   7.09344625]
+print(params) # [169.72950204   9.75167973  15.31139737   8.74598833]
 # errors contains the standard deviation estimates
-print(errors) # [5.95666678 0.36768626 0.36958631 0.75938191]
+print(errors) # [7.6596202  0.50514601 0.52233199 1.06721765]
 # vlsr_rms is the rms LSR velocity residual (km/s)
-print(vlsr_rms) # 5.492385979515315
+print(vlsr_rms) # 5.6165309797944065
 
 print(f"Expected: {truths['mom3_mom2_abs_z_ratio']}") # Expected: 159.57691216057307
-print(f"Result: {params[0]}") # Result: 160.11753379581967
+print(f"Result: {params[0]}") # Result: 169.72950203558383
 ```
 
 ## MCMC
 
-There are a few different ways to approach this problem in a Bayesian way.
+There are two Bayesian ways to approach this problem.
 
 ### Moment Ratio
 
 First, we can simply infer the ratio of the third to second raw
 moments of the `|z|` distribution, as in the least squares method. The
 class `MomentRatioModel` in `mcmc.py` samples the *marginal* posterior distribution,
-marginalized over the unknown distances of each cloud. As in the least squares
-method, we assign each cloud to its expected distance for the inferred moment ratio.
+marginalized over the latent distances of each cloud.
 The priors on the Galactic rotation model are taken from a multivariate normal
 distribution fit to the posterior samples of the Reid et al. (2019) A5 model.
 The prior for the moment ratio is a `k=2` gamma distribution with a user-supplied
@@ -150,201 +175,190 @@ mode.
 
 ```python
 from kinematic_scaleheight.mcmc import MomentRatioModel
-model = MomentRatioModel(
+gaussian_momratio_model = MomentRatioModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
     prior_mom3_mom2_abs_z_ratio=50.0, # mode of the moment ratio prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
 
 # prior predictive checks
 !mkdir example
-prior, prior_predictive = model.plot_predictive(
+gaussian_momratio_vlsr_prior = gaussian_momratio_model.vlsr_predictive(
     "prior", # prior predictive
     50, # prior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/moment_ratio_", # plot filename prefix
+    fname="example/gaussian_moment_ratio_vlsr_prior.pdf", # plot filename
+    seed=1234, # random seed
 )
 
 # posterior sampling
-model.sample(
+gaussian_momratio_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                           mean     sd   hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# rotcurve[0]              8.168  0.011    8.147    8.189      0.000    0.000    2491.0    1561.0   1.00
-# rotcurve[1]             10.594  0.269   10.087   11.087      0.006    0.004    2291.0    1670.0   1.00
-# rotcurve[2]             15.714  0.373   14.964   16.359      0.008    0.006    2292.0    1549.0   1.00
-# rotcurve[3]              7.670  0.232    7.224    8.083      0.005    0.004    2098.0    1595.0   1.00
-# rotcurve[4]              0.959  0.013    0.936    0.986      0.000    0.000    2489.0    1649.0   1.00
-# rotcurve[5]              1.610  0.003    1.605    1.616      0.000    0.000    1599.0    1558.0   1.00
-# mom3_mom2_abs_z_ratio  161.332  6.002  150.503  172.537      0.123    0.087    2357.0    1546.0   1.00
-# vlsr_err                 5.521  0.177    5.187    5.852      0.003    0.002    3283.0    1407.0   1.01
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, mom3_mom2_abs_z_ratio, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 8 seconds.chains, 0 divergences]
+                          mean     sd   hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]              8.166  0.011    8.147    8.186      0.000    0.000    2641.0    1331.0    1.0
+rotcurve[1]             10.216  0.315    9.642   10.819      0.006    0.004    3047.0    1532.0    1.0
+rotcurve[2]             15.234  0.551   14.183   16.272      0.011    0.008    2664.0    1514.0    1.0
+rotcurve[3]              7.769  0.244    7.330    8.247      0.004    0.003    3705.0    1478.0    1.0
+rotcurve[4]              0.964  0.013    0.938    0.986      0.000    0.000    3385.0    1913.0    1.0
+rotcurve[5]              1.612  0.003    1.606    1.618      0.000    0.000    2577.0    1482.0    1.0
+mom3_mom2_abs_z_ratio  163.506  8.934  147.181  180.331      0.155    0.110    3285.0    1687.0    1.0
+vlsr_err                 5.495  0.346    4.879    6.187      0.006    0.005    2949.0    1749.0    1.0
+w[0]                     0.863  0.035    0.803    0.929      0.001    0.000    2627.0    1429.0    1.0
+w[1]                     0.137  0.035    0.071    0.197      0.001    0.000    2627.0    1429.0    1.0
+outlier_vlsr_sigma      21.855  3.269   16.214   27.812      0.067    0.050    2664.0    1598.0    1.0
+"""
+# Note:
+# rotcurve[0] = R0 (kpc)
+# rotcurve[1] = Usun (km/s)
+# rotcurve[2] = Vsun (km/s)
+# rotcurve[3] = Wsun (km/s)
+# rotcurve[4] = a2
+# rotcurve[5] = a3
+# w[0] = non-outlier fraction
+# w[1] = outlier fraction
 
 print(f"Expected: {truths['mom3_mom2_abs_z_ratio']}") # Expected: 159.57691216057307
 
 # posterior predictive check
-posterior, posterior_predictive = model.plot_predictive(
+gaussian_momratio_vlsr_posterior = gaussian_momratio_model.vlsr_predictive(
     "posterior", # posterior predictive
     50, # posterior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/moment_ratio_", # plot filename prefix
+    fname="example/gaussian_moment_ratio_vlsr_posterior.pdf", # plot filename
+    seed=1234, # random seed
+)
+
+# posterior latent outlier probability
+gaussian_momratio_outlier_posterior = gaussian_momratio_model.outlier_predictive(
+    50, # posterior predictive samples
+    truths=truths, # truths dictionary
+    fname="example/gaussian_moment_ratio_outlier_posterior.pdf", # plot filename
+    prob=0.5, # posterior outlier probability threshold
+    seed=1234, # random seed
+)
+
+# posterior latent distance probability
+gaussian_momratio_distance_posterior = gaussian_momratio_model.distance_predictive(
+    50, # posterior predictive samples
+    distribution="gaussian", # assumed distribution
+    truths=truths, # truths dictionary
+    fname="example/gaussian_moment_ratio_distance_posterior.pdf", # plot filename
+    seed=1234, # random seed
 )
 
 # corner plot
-model.plot_corner(
+gaussian_momratio_model.plot_corner(
     truths=truths, # optional truths dictionary
-    plot_prefix="example/moment_ratio_", # plot filename prefix
+    fname="example/gaussian_moment_ratio_corner.pdf", # plot filename
 )
 ```
 
-### Marginalized Distance
+### Shape
 
 Alternatively, if we assume the shape of the `|z|` distribution, then we can
 infer the shape parameter of this distribution directly. The `MarginalDistanceModel`
 class in `mcmc.py` does just that, but still samples the *marginal* posterior distribution,
-marginalized over the unknown distances of each cloud. The distributions and shape
+marginalized over the latent distances of each cloud. The distributions and shape
 parameters are the same as in `simulate.py`. The prior on the shape parameter is
 a `k=2` gamma distribution with a user-supplied mode.
 
 ```python
-from kinematic_scaleheight.mcmc import MarginalDistanceModel
-model = MarginalDistanceModel(
+from kinematic_scaleheight.mcmc import ShapeModel
+gaussian_shape_model = ShapeModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
     distribution="gaussian", # assumed z distribution
     prior_shape=50.0, # mode of the shape prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
 
 # prior predictive checks
-!mkdir example
-prior, prior_predictive = model.plot_predictive(
+gaussian_shape_vlsr_prior = gaussian_shape_model.vlsr_predictive(
     "prior", # prior predictive
     50, # prior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/marginal_distance_", # plot filename prefix
+    fname="example/gaussian_shape_vlsr_prior.pdf", # plot filename
+    seed=1234, # random seed
 )
 
 # posterior sampling
-model.sample(
+gaussian_shape_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                 mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# rotcurve[0]    8.168  0.011   8.147    8.187      0.000    0.000    1946.0    1618.0    1.0
-# rotcurve[1]   10.588  0.277  10.079   11.130      0.006    0.004    2464.0    1737.0    1.0
-# rotcurve[2]   15.702  0.360  15.027   16.368      0.008    0.006    1849.0    1744.0    1.0
-# rotcurve[3]    7.672  0.237   7.257    8.127      0.004    0.003    2867.0    1722.0    1.0
-# rotcurve[4]    0.960  0.013   0.936    0.983      0.000    0.000    2268.0    1742.0    1.0
-# rotcurve[5]    1.610  0.003   1.605    1.616      0.000    0.000    1758.0    1408.0    1.0
-# shape        101.202  3.892  94.192  108.702      0.075    0.053    2708.0    1486.0    1.0
-# vlsr_err       5.521  0.173   5.206    5.861      0.004    0.003    2417.0    1570.0    1.0
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 8 seconds.chains, 0 divergences]
+                       mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]           8.166  0.011   8.145    8.185      0.000    0.000    3038.0    1555.0    1.0
+rotcurve[1]          10.206  0.328   9.622   10.854      0.006    0.004    3424.0    1518.0    1.0
+rotcurve[2]          15.239  0.546  14.232   16.215      0.012    0.008    2177.0    1806.0    1.0
+rotcurve[3]           7.765  0.245   7.326    8.258      0.004    0.003    3671.0    1594.0    1.0
+rotcurve[4]           0.964  0.013   0.938    0.988      0.000    0.000    2895.0    1531.0    1.0
+rotcurve[5]           1.612  0.003   1.605    1.618      0.000    0.000    2465.0    1819.0    1.0
+shape               102.876  5.576  93.559  114.307      0.089    0.063    3983.0    1428.0    1.0
+vlsr_err              5.491  0.322   4.881    6.083      0.007    0.005    2302.0    1798.0    1.0
+w[0]                  0.862  0.034   0.800    0.925      0.001    0.000    2502.0    1504.0    1.0
+w[1]                  0.138  0.034   0.075    0.200      0.001    0.000    2502.0    1504.0    1.0
+outlier_vlsr_sigma   21.677  3.079  16.348   27.475      0.058    0.042    2916.0    1864.0    1.0
+"""
 
 print(f"Expected: {truths['shape']}") # Expected: 100.0
 
 # posterior predictive check
-posterior, posterior_predictive = model.plot_predictive(
+gaussian_shape_vlsr_posterior = gaussian_shape_model.vlsr_predictive(
     "posterior", # posterior predictive
     50, # posterior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/marginal_distance_", # plot filename prefix
+    fname="example/gaussian_shape_vlsr_posterior.pdf", # plot filename
+    seed=1234, # random seed
+)
+
+# posterior latent outlier probability
+gaussian_shape_outlier_posterior = gaussian_shape_model.outlier_predictive(
+    50, # posterior predictive samples
+    truths=truths, # truths dictionary
+    fname="example/gaussian_shape_outlier_posterior.pdf", # plot filename
+    prob=0.5, # posterior outlier probability threshold
+    seed=1234, # random seed
+)
+
+# posterior latent distance probability
+# N.B. Note that we do not pass a distribution here, since one is set
+# for this model at initialization
+gaussian_shape_distance_posterior = gaussian_shape_model.distance_predictive(
+    50, # posterior predictive samples
+    truths=truths, # truths dictionary
+    fname="example/gaussian_shape_distance_posterior.pdf", # plot filename
+    seed=1234, # random seed
 )
 
 # corner plot
-model.plot_corner(
+gaussian_shape_model.plot_corner(
     truths=truths, # optional truths dictionary
-    plot_prefix="example/marginal_distance_", # plot filename prefix
-)
-```
-
-### Full Distance
-
-Finally, we can again infer the shape parameter of the `|z|` distribution
-directly, but here we sample the full posterior distribution, including the
-distances to each cloud. We can therefore relax the assumption that the
-clouds are not truncated in distance (see [Caveats](#caveats)).
-
-```python
-from kinematic_scaleheight.mcmc import FullDistanceModel
-model = FullDistanceModel(
-    glong, # Galactic longitudes of clouds (deg)
-    glat, # Galactic latitudes of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
-    distribution="gaussian", # assumed z distribution
-    prior_shape=50.0, # mode of the shape prior (pc)
-    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
-    d_max=2000.0, # truncate distance distribution at this distance (pc)
-)
-
-# prior predictive checks
-!mkdir example
-prior, prior_predictive = model.plot_predictive(
-    "prior", # prior predictive
-    50, # prior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/full_distance_", # plot filename prefix
-)
-
-# posterior sampling
-# Note that we use init="adapt_diag" since jittering does not play nice with truncated
-# distributions. Also note that sampling can, in general, be more challenging since
-# the distances are not well constrained kinematically in the solar neighborhood.
-# Hence, here we draw more samples.
-model.sample(
-    init="adapt_diag", # initialization strategy
-    tune=1000, # tuning samples
-    draws=1000, # posterior samples
-    cores=4, # number of CPU cores to use
-    chains=4, # number of MC chains to run
-    target_accept=0.80, # target acceptance rate for sampling
-)
-#                 mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# rotcurve[0]    8.168  0.011   8.147    8.187      0.000    0.000    2510.0    2264.0   1.00
-# rotcurve[1]   10.569  0.272  10.071   11.079      0.006    0.004    2389.0    2250.0   1.00
-# rotcurve[2]   15.821  0.364  15.095   16.462      0.009    0.006    1739.0    2111.0   1.00
-# rotcurve[3]    7.662  0.233   7.236    8.110      0.004    0.003    3160.0    2645.0   1.00
-# rotcurve[4]    0.959  0.014   0.933    0.984      0.000    0.000    2522.0    2015.0   1.00
-# rotcurve[5]    1.610  0.003   1.604    1.616      0.000    0.000    1971.0    2206.0   1.00
-# shape        102.914  4.368  94.847  111.016      0.293    0.208     221.0     679.0   1.01
-# vlsr_err       4.828  0.185   4.484    5.166      0.005    0.003    1514.0    2346.0   1.00
-
-print(f"Expected: {truths['shape']}") # Expected: 100.0
-
-# We can inspect the posterior statistics for the distances, too
-import arviz as az
-summary = az.summary(model.trace)
-print(summary[7:13])
-#                  mean       sd   hdi_3%   hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# distance[0]   757.101  330.021  153.388  1354.544     10.428    8.865    1278.0     663.0    1.0
-# distance[1]   312.937  132.326   66.282   545.195      2.844    2.242    2430.0    1877.0    1.0
-# distance[2]   819.522  336.496  236.501  1461.699      8.884    7.135    1598.0    1012.0    1.0
-# distance[3]   523.986  226.338  114.376   914.196      6.828    5.842    1416.0     803.0    1.0
-# distance[4]   703.863  220.044  294.453  1117.108      4.751    3.742    2270.0    1409.0    1.0
-# distance[5]  1071.387  384.358  334.118  1750.720     10.962    9.175    1229.0     743.0    1.0
-
-# posterior predictive check
-posterior, posterior_predictive = model.plot_predictive(
-    "posterior", # posterior predictive
-    50, # posterior predictive samples
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/full_distance_", # plot filename prefix
-)
-
-# corner plot
-model.plot_corner(
-    truths=truths, # optional truths dictionary
-    plot_prefix="example/full_distance_", # plot filename prefix
+    fname="example/gaussian_shape_corner.pdf", # plot filename
 )
 ```
 
@@ -355,114 +369,127 @@ the results for the other supported distributions.
 
 ### Exponential
 
-Note that an "exponential" distribution has a long tail, and thus the assumption that
-`d_max sin(b_min) >> mom1_abs_z` becomes less accurate for small `d_max` or small `b_min` 
-(see [Caveats](#caveats)). The
-least squares and marginalized distance methods will yield incorrect results in this case.
-Here we've increased `d_max` to ensure the approximation is more valid, but still the
-least squares and marginalized distance methods suffer from the bias.
-
 ```python
 # Generate data
 from kinematic_scaleheight.simulate import gen_synthetic_sample
 glong, glat, vlsr, truths = gen_synthetic_sample(
-    500, # sample size
+    300, # sample size
     distribution='exponential', # vertical distribution shape
     shape=100.0, # shape parameter for the distribution (pc)
     vlsr_err=5.0, # random noise added to observed LSR velocities (km/s)
-    d_max=5000.0, # maximum distance of the clouds (pc)
     b_min=10.0, # minimum Galactic latitude (deg)
     b_max=90.0, # maximum Galactic latitude (deg)
+    outlier_vlsr_sigma=30.0, # width of LSR velocity distribution for outliers (km/s)
+    outlier_frac=0.1, # fraction of sample that are outliers
     seed=1234, # random seed
+    verbose=True, # print helpful information
 )
+"""
+Simulating 300 clouds up to d_max = 5758.770 pc
+Added 40 clouds (40/300) in iteration 0
+Added 40 clouds (80/300) in iteration 1
+Added 52 clouds (132/300) in iteration 2
+Added 35 clouds (167/300) in iteration 3
+Added 37 clouds (204/300) in iteration 4
+Added 50 clouds (254/300) in iteration 5
+Added 39 clouds (293/300) in iteration 6
+Added 40 clouds (333/300) in iteration 7
+Simulation complete. Trimming sample to 300 clouds
+"""
 
 # Corrected least-squares
 from kinematic_scaleheight.leastsq import leastsq
 params, errors, vlsr_rms = leastsq(
-    glong, # Galactic longitude of clouds (deg)
-    glat, # Galactic latitude of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
+    glong[~truths['outlier']], # Galactic longitude of clouds (deg)
+    glat[~truths['outlier']], # Galactic latitude of clouds (deg)
+    vlsr[~truths['outlier']], # LSR velocities of clouds (km/s)
     R0 = truths['R0'], # Galactocentric radius of the Sun (kpc)
     a2 = truths['a2'], # rotation curve parameter
     a3 = truths['a3'], # rotation curve parameter
 )
 # mom3_mom2_abs_z_ratio (pc)
 print(f"Expected: {truths['mom3_mom2_abs_z_ratio']}") # Expected: 300.0
-print(f"Result: {params[0]}") # Result: Result: 284.2074519228318
-# N.B. Notice the difference due to the poor assumption
+print(f"Result: {params[0]}") # Result: 312.10982400921495
 
 # Moment ratio MCMC
 from kinematic_scaleheight.mcmc import MomentRatioModel
-model = MomentRatioModel(
+exponential_momratio_model = MomentRatioModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
     prior_mom3_mom2_abs_z_ratio=100.0, # mode of the moment ratio prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
-model.sample(
+exponential_momratio_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                           mean     sd   hdi_3%  hdi_97%  mcse_mean  
-# mom3_mom2_abs_z_ratio  288.521  8.682  272.043  304.364      0.159    0.113    2995.0    1476.0    1.0
-# vlsr_err                 7.824  0.237    7.358    8.242      0.005    0.003    2463.0    1739.0    1.0
-# N.B. Better, but still biased
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, mom3_mom2_abs_z_ratio, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                          mean      sd   hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]              8.168   0.011    8.146    8.187      0.000    0.000    2963.0    1139.0    1.0
+rotcurve[1]             10.488   0.360    9.817   11.175      0.006    0.004    3723.0    1582.0    1.0
+rotcurve[2]             16.922   0.775   15.477   18.362      0.017    0.012    2013.0    1355.0    1.0
+rotcurve[3]              7.684   0.231    7.300    8.155      0.004    0.003    3540.0    1594.0    1.0
+rotcurve[4]              0.955   0.014    0.926    0.978      0.000    0.000    2602.0    1428.0    1.0
+rotcurve[5]              1.606   0.004    1.599    1.613      0.000    0.000    1965.0    1514.0    1.0
+mom3_mom2_abs_z_ratio  293.828  16.219  264.313  324.500      0.292    0.206    3061.0    1448.0    1.0
+vlsr_err                 7.244   0.598    6.146    8.360      0.014    0.010    1794.0    1709.0    1.0
+w[0]                     0.841   0.038    0.766    0.906      0.001    0.001    1982.0    1408.0    1.0
+w[1]                     0.159   0.038    0.094    0.234      0.001    0.001    1982.0    1408.0    1.0
+outlier_vlsr_sigma      34.177   4.429   26.939   42.600      0.091    0.067    2648.0    1574.0    1.0
+"""
 
-# Marginalized distance MCMC
-from kinematic_scaleheight.mcmc import MarginalDistanceModel
-model = MarginalDistanceModel(
+# Shape MCMC
+from kinematic_scaleheight.mcmc import ShapeModel
+exponential_shape_model = ShapeModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
     distribution="exponential", # assumed z distribution
     prior_shape=100.0, # mode of the shape prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
-model.sample(
+exponential_shape_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# shape        96.327  2.822  91.005  101.463      0.052    0.037    2959.0    1614.0    1.0
-# vlsr_err      7.826  0.240   7.393    8.303      0.004    0.003    2905.0    1404.0    1.0
-# N.B. Again, still biased
-
-# Full distance MCMC
-from kinematic_scaleheight.mcmc import FullDistanceModel
-model = FullDistanceModel(
-    glong, # Galactic longitudes of clouds (deg)
-    glat, # Galactic latitudes of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
-    distribution="exponential", # assumed z distribution
-    prior_shape=50.0, # mode of the shape prior (pc)
-    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
-    d_max=5000.0, # truncate distance distribution at this distance (pc)
-)
-# N.B. Need more samples for convergence
-model.sample(
-    init="adapt_diag", # initialization strategy
-    tune=5000, # tuning samples
-    draws=5000, # posterior samples
-    cores=8, # number of CPU cores to use
-    chains=8, # number of MC chains to run
-    target_accept=0.80, # target acceptance rate for sampling
-)
-#                mean      sd   hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# shape        100.568  3.814  93.310  107.904      0.280    0.198     185.0     358.0   1.05
-# vlsr_err       5.118  0.266   4.609    5.607      0.004    0.003    4231.0   12620.0   1.00
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                      mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]          8.168  0.011   8.148    8.189      0.000    0.000    3554.0    1571.0    1.0
+rotcurve[1]         10.490  0.361   9.794   11.159      0.006    0.004    3288.0    1475.0    1.0
+rotcurve[2]         16.915  0.762  15.512   18.348      0.017    0.012    2014.0    1693.0    1.0
+rotcurve[3]          7.691  0.248   7.198    8.125      0.004    0.003    3408.0    1398.0    1.0
+rotcurve[4]          0.955  0.014   0.928    0.979      0.000    0.000    2904.0    1279.0    1.0
+rotcurve[5]          1.606  0.004   1.599    1.613      0.000    0.000    1947.0    1480.0    1.0
+shape               98.390  5.206  88.772  108.581      0.094    0.066    3082.0    1701.0    1.0
+vlsr_err             7.283  0.601   6.156    8.337      0.013    0.009    2044.0    1708.0    1.0
+w[0]                 0.843  0.038   0.774    0.913      0.001    0.001    2190.0    1743.0    1.0
+w[1]                 0.157  0.038   0.087    0.226      0.001    0.001    2190.0    1743.0    1.0
+outlier_vlsr_sigma  34.168  4.718  25.837   42.693      0.100    0.072    2583.0    1618.0    1.0
+"""
 ```
-
-Notice that the `r_hat` statistic is still large for `shape`. We need
-even more posterior samples to ensure convergence.
 
 ### Rectangular
 
@@ -470,108 +497,341 @@ even more posterior samples to ensure convergence.
 # Generate data
 from kinematic_scaleheight.simulate import gen_synthetic_sample
 glong, glat, vlsr, truths = gen_synthetic_sample(
-    1000, # sample size
+    300, # sample size
     distribution='rectangular', # vertical distribution shape
     shape=100.0, # shape parameter for the distribution (pc)
     vlsr_err=5.0, # random noise added to observed LSR velocities (km/s)
-    d_max=2000.0, # maximum distance of the clouds (pc)
     b_min=10.0, # minimum Galactic latitude (deg)
     b_max=90.0, # maximum Galactic latitude (deg)
+    outlier_vlsr_sigma=30.0, # width of LSR velocity distribution for outliers (km/s)
+    outlier_frac=0.1, # fraction of sample that are outliers
     seed=1234, # random seed
+    verbose=True, # print helpful information
 )
+"""
+Simulating 300 clouds up to d_max = 5758.770 pc
+Added 10 clouds (10/300) in iteration 0
+Added 8 clouds (18/300) in iteration 1
+Added 6 clouds (24/300) in iteration 2
+Added 7 clouds (31/300) in iteration 3
+Added 13 clouds (44/300) in iteration 4
+Added 4 clouds (48/300) in iteration 5
+Added 10 clouds (58/300) in iteration 6
+Added 7 clouds (65/300) in iteration 7
+Added 9 clouds (74/300) in iteration 8
+Added 6 clouds (80/300) in iteration 9
+Added 3 clouds (83/300) in iteration 10
+Added 9 clouds (92/300) in iteration 11
+Added 14 clouds (106/300) in iteration 12
+Added 7 clouds (113/300) in iteration 13
+Added 6 clouds (119/300) in iteration 14
+Added 5 clouds (124/300) in iteration 15
+Added 5 clouds (129/300) in iteration 16
+Added 5 clouds (134/300) in iteration 17
+Added 10 clouds (144/300) in iteration 18
+Added 5 clouds (149/300) in iteration 19
+Added 10 clouds (159/300) in iteration 20
+Added 9 clouds (168/300) in iteration 21
+Added 11 clouds (179/300) in iteration 22
+Added 6 clouds (185/300) in iteration 23
+Added 6 clouds (191/300) in iteration 24
+Added 7 clouds (198/300) in iteration 25
+Added 8 clouds (206/300) in iteration 26
+Added 6 clouds (212/300) in iteration 27
+Added 4 clouds (216/300) in iteration 28
+Added 7 clouds (223/300) in iteration 29
+Added 5 clouds (228/300) in iteration 30
+Added 3 clouds (231/300) in iteration 31
+Added 5 clouds (236/300) in iteration 32
+Added 9 clouds (245/300) in iteration 33
+Added 10 clouds (255/300) in iteration 34
+Added 9 clouds (264/300) in iteration 35
+Added 5 clouds (269/300) in iteration 36
+Added 4 clouds (273/300) in iteration 37
+Added 3 clouds (276/300) in iteration 38
+Added 8 clouds (284/300) in iteration 39
+Added 9 clouds (293/300) in iteration 40
+Added 4 clouds (297/300) in iteration 41
+Added 3 clouds (300/300) in iteration 42
+Simulation complete. Trimming sample to 300 clouds
+"""
 
 # Corrected least-squares
 from kinematic_scaleheight.leastsq import leastsq
 params, errors, vlsr_rms = leastsq(
-    glong, # Galactic longitude of clouds (deg)
-    glat, # Galactic latitude of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
+    glong[~truths['outlier']], # Galactic longitude of clouds (deg)
+    glat[~truths['outlier']], # Galactic latitude of clouds (deg)
+    vlsr[~truths['outlier']], # LSR velocities of clouds (km/s)
     R0 = truths['R0'], # Galactocentric radius of the Sun (kpc)
     a2 = truths['a2'], # rotation curve parameter
     a3 = truths['a3'], # rotation curve parameter
 )
 # mom3_mom2_abs_z_ratio (pc)
 print(f"Expected: {truths['mom3_mom2_abs_z_ratio']}") # Expected: 75.0
-print(f"Result: {params[0]}") # Result: 72.94068819947938
+print(f"Result: {params[0]}") # Result: 70.08395890730624
 
 # Moment ratio MCMC
 from kinematic_scaleheight.mcmc import MomentRatioModel
-model = MomentRatioModel(
+rectangular_momratio_model = MomentRatioModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
-    prior_mom3_mom2_abs_z_ratio=300.0, # mode of the moment ratio prior (pc)
+    prior_mom3_mom2_abs_z_ratio=100.0, # mode of the moment ratio prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
-model.sample(
+rectangular_momratio_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                          mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# mom3_mom2_abs_z_ratio  74.053  4.062  66.495   81.834      0.081    0.057    2521.0    1709.0    1.0
-# vlsr_err                4.953  0.110   4.725    5.143      0.002    0.002    2637.0    1503.0    1.0
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, mom3_mom2_abs_z_ratio, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]             8.167  0.011   8.146    8.186      0.000    0.000    2968.0    1252.0   1.00
+rotcurve[1]            10.260  0.305   9.706   10.851      0.005    0.004    3256.0    1510.0   1.00
+rotcurve[2]            16.266  0.491  15.258   17.115      0.010    0.007    2522.0    1601.0   1.00
+rotcurve[3]             7.708  0.234   7.291    8.179      0.004    0.003    3398.0    1596.0   1.00
+rotcurve[4]             0.959  0.013   0.933    0.983      0.000    0.000    2773.0    1301.0   1.00
+rotcurve[5]             1.608  0.003   1.602    1.614      0.000    0.000    2671.0    1539.0   1.00
+mom3_mom2_abs_z_ratio  70.249  8.165  54.545   85.840      0.139    0.099    3438.0    1179.0   1.01
+vlsr_err                5.038  0.261   4.562    5.515      0.005    0.003    2952.0    1861.0   1.00
+w[0]                    0.898  0.023   0.856    0.942      0.000    0.000    3302.0    1770.0   1.00
+w[1]                    0.102  0.023   0.058    0.144      0.000    0.000    3302.0    1770.0   1.00
+outlier_vlsr_sigma     34.394  5.543  24.633   44.500      0.113    0.085    2773.0    1398.0   1.00
+"""
 
-# Marginal distance MCMC
-from kinematic_scaleheight.mcmc import MarginalDistanceModel
-model = MarginalDistanceModel(
+# Shape MCMC
+from kinematic_scaleheight.mcmc import ShapeModel
+rectangular_shape_model = ShapeModel(
     glong, # Galactic longitudes of clouds (deg)
     glat, # Galactic latitudes of clouds (deg)
     vlsr, # LSR velocities of clouds (km/s)
     distribution="rectangular", # assumed z distribution
-    prior_shape=300.0, # mode of the shape prior (pc)
+    prior_shape=100.0, # mode of the shape prior (pc)
     prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
 )
-model.sample(
+rectangular_shape_model.sample(
     init="jitter+adapt_diag", # initialization strategy
     tune=500, # tuning samples
     draws=500, # posterior samples
     cores=4, # number of CPU cores to use
     chains=4, # number of MC chains to run
     target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
 )
-#                mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# shape        98.583  5.232  89.052  109.152      0.106    0.075    2425.0    1531.0    1.0
-# vlsr_err      4.959  0.113   4.760    5.189      0.002    0.002    2521.0    1473.0    1.0
-
-# Full distance MCMC
-from kinematic_scaleheight.mcmc import FullDistanceModel
-model = FullDistanceModel(
-    glong, # Galactic longitudes of clouds (deg)
-    glat, # Galactic latitudes of clouds (deg)
-    vlsr, # LSR velocities of clouds (km/s)
-    distribution="rectangular", # assumed z distribution
-    prior_shape=50.0, # mode of the shape prior (pc)
-    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
-    d_max=2000.0, # truncate distance distribution at this distance (pc)
-)
-model.sample(
-    init="adapt_diag", # initialization strategy
-    tune=1000, # tuning samples
-    draws=1000, # posterior samples
-    cores=4, # number of CPU cores to use
-    chains=4, # number of MC chains to run
-    target_accept=0.80, # target acceptance rate for sampling
-)
-#                mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# shape        98.320  5.288  88.672  108.373      0.068    0.048    6073.0    2649.0    1.0
-# vlsr_err      4.890  0.112   4.683    5.101      0.001    0.001    7093.0    2859.0    1.0
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                      mean      sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]          8.167   0.011   8.148    8.189      0.000    0.000    2954.0    1705.0   1.00
+rotcurve[1]         10.271   0.316   9.662   10.851      0.006    0.004    3148.0    1707.0   1.00
+rotcurve[2]         16.246   0.478  15.397   17.205      0.010    0.007    2389.0    1408.0   1.01
+rotcurve[3]          7.711   0.232   7.274    8.123      0.004    0.003    3071.0    1888.0   1.01
+rotcurve[4]          0.959   0.013   0.935    0.984      0.000    0.000    2851.0    1627.0   1.00
+rotcurve[5]          1.608   0.003   1.602    1.614      0.000    0.000    2214.0    1464.0   1.00
+shape               93.342  10.318  74.753  112.936      0.191    0.135    2929.0    1676.0   1.00
+vlsr_err             5.040   0.262   4.565    5.509      0.005    0.003    3040.0    1452.0   1.00
+w[0]                 0.898   0.024   0.855    0.942      0.000    0.000    2740.0    1843.0   1.00
+w[1]                 0.102   0.024   0.058    0.145      0.000    0.000    2740.0    1843.0   1.00
+outlier_vlsr_sigma  34.193   5.279  24.346   43.348      0.107    0.079    2699.0    1710.0   1.00
+"""
 ```
 
-# Caveats
+## Model Comparison
 
-Except for the full distance MCMC method, the other methods inherently assume that
-`d_max sin(b_min) >> mom1_abs_z`. That is, they assume that the effect of a
-truncated distance distribution is hardly noticible at the lowest Galactic latitude.
-For low-latitude clouds or large scale heights of the vertical distribution, this
-assumption is no longer true!
+Here we demonstrate how we can use the MCMC posterior samples to determine which
+distribution best represents the data.
 
-The full distance MCMC method properly handles a truncated distance distribution,
-but sampling the posterior distribution may still be challenging as `d_max sin(b_min)`
-approaches `mom1_abs_z`.
+```python
+# generate data from a Gaussian distribution
+from kinematic_scaleheight.simulate import gen_synthetic_sample
+glong, glat, vlsr, truths = gen_synthetic_sample(
+    300, # sample size
+    distribution='gaussian', # vertical distribution shape
+    shape=100.0, # shape parameter for the distribution (pc)
+    vlsr_err=5.0, # random noise added to observed LSR velocities (km/s)
+    b_min=10.0, # minimum Galactic latitude (deg)
+    b_max=90.0, # maximum Galactic latitude (deg)
+    outlier_vlsr_sigma=30.0, # width of LSR velocity distribution for outliers (km/s)
+    outlier_frac=0.1, # fraction of sample that are outliers
+    seed=1234, # random seed
+    verbose=True, # print helpful information
+)
+"""
+Simulating 300 clouds up to d_max = 5758.770 pc
+Added 22 clouds (22/300) in iteration 0
+Added 19 clouds (41/300) in iteration 1
+Added 23 clouds (64/300) in iteration 2
+Added 24 clouds (88/300) in iteration 3
+Added 24 clouds (112/300) in iteration 4
+Added 23 clouds (135/300) in iteration 5
+Added 23 clouds (158/300) in iteration 6
+Added 17 clouds (175/300) in iteration 7
+Added 28 clouds (203/300) in iteration 8
+Added 23 clouds (226/300) in iteration 9
+Added 26 clouds (252/300) in iteration 10
+Added 29 clouds (281/300) in iteration 11
+Added 20 clouds (301/300) in iteration 12
+Simulation complete. Trimming sample to 300 clouds
+"""
+
+# Infer shape parameter assuming Gaussian distribution
+from kinematic_scaleheight.mcmc import ShapeModel
+gaussian_shape_model = ShapeModel(
+    glong, # Galactic longitudes of clouds (deg)
+    glat, # Galactic latitudes of clouds (deg)
+    vlsr, # LSR velocities of clouds (km/s)
+    distribution="gaussian", # assumed z distribution
+    prior_shape=50.0, # mode of the shape prior (pc)
+    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
+)
+gaussian_shape_model.sample(
+    init="jitter+adapt_diag", # initialization strategy
+    tune=500, # tuning samples
+    draws=500, # posterior samples
+    cores=4, # number of CPU cores to use
+    chains=4, # number of MC chains to run
+    target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
+)
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                       mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]           8.166  0.011   8.145    8.185      0.000    0.000    3038.0    1555.0    1.0
+rotcurve[1]          10.206  0.328   9.622   10.854      0.006    0.004    3424.0    1518.0    1.0
+rotcurve[2]          15.239  0.546  14.232   16.215      0.012    0.008    2177.0    1806.0    1.0
+rotcurve[3]           7.765  0.245   7.326    8.258      0.004    0.003    3671.0    1594.0    1.0
+rotcurve[4]           0.964  0.013   0.938    0.988      0.000    0.000    2895.0    1531.0    1.0
+rotcurve[5]           1.612  0.003   1.605    1.618      0.000    0.000    2465.0    1819.0    1.0
+shape               102.876  5.576  93.559  114.307      0.089    0.063    3983.0    1428.0    1.0
+vlsr_err              5.491  0.322   4.881    6.083      0.007    0.005    2302.0    1798.0    1.0
+w[0]                  0.862  0.034   0.800    0.925      0.001    0.000    2502.0    1504.0    1.0
+w[1]                  0.138  0.034   0.075    0.200      0.001    0.000    2502.0    1504.0    1.0
+outlier_vlsr_sigma   21.677  3.079  16.348   27.475      0.058    0.042    2916.0    1864.0    1.0
+"""
+
+# Infer shape parameter assuming exponential distribution
+from kinematic_scaleheight.mcmc import ShapeModel
+exponential_shape_model = ShapeModel(
+    glong, # Galactic longitudes of clouds (deg)
+    glat, # Galactic latitudes of clouds (deg)
+    vlsr, # LSR velocities of clouds (km/s)
+    distribution="exponential", # assumed z distribution
+    prior_shape=100.0, # mode of the shape prior (pc)
+    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
+)
+exponential_shape_model.sample(
+    init="jitter+adapt_diag", # initialization strategy
+    tune=500, # tuning samples
+    draws=500, # posterior samples
+    cores=4, # number of CPU cores to use
+    chains=4, # number of MC chains to run
+    target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
+)
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 8 seconds.chains, 0 divergences]
+The rhat statistic is larger than 1.01 for some parameters. This indicates problems during sampling. See https://arxiv.org/abs/1903.08008 for details
+                      mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]          8.167  0.011   8.144    8.186      0.000    0.000    3207.0    1432.0   1.00
+rotcurve[1]         10.214  0.335   9.599   10.854      0.006    0.004    3698.0    1544.0   1.00
+rotcurve[2]         15.227  0.560  14.199   16.273      0.012    0.008    2349.0    1472.0   1.00
+rotcurve[3]          7.777  0.238   7.359    8.235      0.004    0.003    3877.0    1615.0   1.00
+rotcurve[4]          0.963  0.013   0.939    0.989      0.000    0.000    1963.0    1269.0   1.01
+rotcurve[5]          1.612  0.003   1.606    1.618      0.000    0.000    2321.0    1516.0   1.00
+shape               54.906  2.944  49.561   60.523      0.050    0.035    3471.0    1475.0   1.00
+vlsr_err             5.479  0.313   4.887    6.056      0.006    0.004    2738.0    1538.0   1.00
+w[0]                 0.862  0.034   0.793    0.917      0.001    0.000    2559.0    1501.0   1.00
+w[1]                 0.138  0.034   0.083    0.207      0.001    0.000    2559.0    1501.0   1.00
+outlier_vlsr_sigma  21.750  3.262  16.343   27.793      0.067    0.050    2700.0    1063.0   1.00
+"""
+
+# Infer shape parameter assuming rectangular distribution
+from kinematic_scaleheight.mcmc import ShapeModel
+rectangular_shape_model = ShapeModel(
+    glong, # Galactic longitudes of clouds (deg)
+    glat, # Galactic latitudes of clouds (deg)
+    vlsr, # LSR velocities of clouds (km/s)
+    distribution="rectangular", # assumed z distribution
+    prior_shape=100.0, # mode of the shape prior (pc)
+    prior_vlsr_err=10.0, # standard deviation of the LSR velocity error prior (km/s)
+    prior_outlier_vlsr_sigma=50.0, # standard deviation of the LSR velocity outlier prior (km/s)
+)
+rectangular_shape_model.sample(
+    init="jitter+adapt_diag", # initialization strategy
+    tune=500, # tuning samples
+    draws=500, # posterior samples
+    cores=4, # number of CPU cores to use
+    chains=4, # number of MC chains to run
+    target_accept=0.80, # target acceptance rate for sampling
+    seed=1234, # random seed
+)
+"""
+Auto-assigning NUTS sampler...
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [rotcurve, outlier_vlsr_sigma, shape, vlsr_err, w]
+Sampling 4 chains for 500 tune and 500 draw iterations (2_000 + 2_000 draws total) took 9 seconds.chains, 0 divergences]
+                       mean      sd   hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+rotcurve[0]           8.166   0.011    8.144    8.186      0.000    0.000    3179.0    1582.0   1.00
+rotcurve[1]          10.207   0.335    9.537   10.796      0.006    0.004    2913.0    1406.0   1.00
+rotcurve[2]          15.234   0.537   14.263   16.219      0.011    0.008    2566.0    1528.0   1.01
+rotcurve[3]           7.761   0.236    7.316    8.196      0.004    0.003    3432.0    1343.0   1.00
+rotcurve[4]           0.963   0.013    0.939    0.989      0.000    0.000    3290.0    1709.0   1.01
+rotcurve[5]           1.612   0.003    1.605    1.617      0.000    0.000    2344.0    1490.0   1.01
+shape               218.496  11.838  196.722  241.011      0.206    0.146    3295.0    1361.0   1.00
+vlsr_err              5.489   0.330    4.892    6.122      0.006    0.004    2931.0    1774.0   1.00
+w[0]                  0.861   0.035    0.798    0.921      0.001    0.000    2841.0    1589.0   1.00
+w[1]                  0.139   0.035    0.079    0.202      0.001    0.000    2841.0    1589.0   1.00
+outlier_vlsr_sigma   21.750   3.268   16.003   27.720      0.070    0.051    2507.0    1570.0   1.00
+"""
+
+# Compute log-likelihoods for each model
+import pymc as pm
+for model in [gaussian_shape_model, exponential_shape_model, rectangular_shape_model]:
+    with model.model:
+        pm.compute_log_likelihood(model.trace)
+
+# Leave-one-out (LOO) cross-validation
+import arviz as az
+compare_loo = az.compare({
+    "gaussian": gaussian_shape_model.trace,
+    "exponential": exponential_shape_model.trace,
+    "rectangular": rectangular_shape_model.trace,
+})
+print(compare_loo)
+"""
+             rank     elpd_loo     p_loo  elpd_diff        weight         se       dse  warning scale
+rectangular     0 -1042.460891  5.012141   0.000000  1.000000e+00  19.133027  0.000000    False   log
+gaussian        1 -1042.478919  5.070481   0.018029  0.000000e+00  19.168408  0.066034    False   log
+exponential     2 -1042.501990  5.074365   0.041099  3.330669e-16  19.163474  0.113451    False   log
+"""
+```
+
+In this example, each of the three distributions is equally likely.
 
 # Issues and Contributing
 
