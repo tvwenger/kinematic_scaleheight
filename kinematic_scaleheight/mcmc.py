@@ -90,7 +90,9 @@ class BaseModel:
             reid19_mean, reid19_cov = pickle.load(f)
 
         # Define model
-        with pm.Model(coords={"data": range(self.size)}) as self.model:
+        with pm.Model(
+            coords={"data": range(self.size), "outlier": [0, 1]}
+        ) as self.model:
             # multivariate-normal distribution in rotation curve parameters
             # order: R0, Usun, Vsun, Wsun, a2, a3
             _ = pm.MvNormal("rotcurve", mu=reid19_mean, cov=reid19_cov)
@@ -205,6 +207,7 @@ class BaseModel:
                 chains=chains,
                 target_accept=target_accept,
                 random_seed=seed,
+                idata_kwargs={"log_likelihood": True},
             )
         print(
             pm.summary(
@@ -499,7 +502,7 @@ class MomentRatioModel(BaseModel):
             self.model_vlsr_dist = pm.Normal.dist(mu=vlsr_mu, sigma=vlsr_err)
 
             # observed mixture
-            w = pm.Dirichlet("w", a=np.ones(2))
+            w = pm.Dirichlet("w", a=np.ones(2), dims="outlier")
             _ = pm.Mixture(
                 "vlsr",
                 w=w,
@@ -640,7 +643,7 @@ class ShapeModel(BaseModel):
             self.model_vlsr_dist = pm.Normal.dist(mu=vlsr_mu, sigma=vlsr_err)
 
             # observed mixture
-            w = pm.Dirichlet("w", a=np.ones(2))
+            w = pm.Dirichlet("w", a=np.ones(2), dims="outlier")
             _ = pm.Mixture(
                 "vlsr",
                 w=w,

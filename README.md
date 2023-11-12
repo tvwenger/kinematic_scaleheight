@@ -656,7 +656,7 @@ Here we demonstrate how we can use the MCMC posterior samples to determine which
 distribution best represents the data.
 
 ```python
-# generate data from a Gaussian distribution
+# Generate data from a Gaussian distribution
 from kinematic_scaleheight.simulate import gen_synthetic_sample
 glong, glat, vlsr, truths = gen_synthetic_sample(
     300, # sample size
@@ -809,12 +809,6 @@ w[1]                  0.139   0.035    0.079    0.202      0.001    0.000    284
 outlier_vlsr_sigma   21.750   3.268   16.003   27.720      0.070    0.051    2507.0    1570.0   1.00
 """
 
-# Compute log-likelihoods for each model
-import pymc as pm
-for model in [gaussian_shape_model, exponential_shape_model, rectangular_shape_model]:
-    with model.model:
-        pm.compute_log_likelihood(model.trace)
-
 # Leave-one-out (LOO) cross-validation
 import arviz as az
 compare_loo = az.compare({
@@ -831,7 +825,9 @@ exponential     2 -1042.501990  5.074365   0.041099  3.330669e-16  19.163474  0.
 """
 ```
 
-In this example, each of the three distributions is equally likely.
+In this example, each of the three distributions is equally likely. The distance uncertainties due
+to the uncertain Galactic rotation curve wash out any evidence that distinguishes between the three
+models.
 
 # Issues and Contributing
 
