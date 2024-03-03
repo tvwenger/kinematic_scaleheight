@@ -24,10 +24,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Trey Wenger - June 2023
 Trey Wenger - November 2023 - add outlier component, remove d_max,
     remove FullDistanceModel
+Trey Wenger - March 2023 - update Reid et al. (2019) parameters
 """
 
 import os
-import pickle
 import numpy as np
 import pymc as pm
 import matplotlib.pyplot as plt
@@ -36,6 +36,41 @@ import corner
 from pymc_experimental.distributions import Chi
 
 from kinematic_scaleheight.rotation import reid19_vlsr
+
+
+def load_reid19_params():
+    """
+    Load the Reid et al. (2019) A5 model parameters and
+    covariance matrix.
+
+    The model parameters are, in this order:
+        R0 :: scalar (kpc)
+            Solar Galactocentric radius
+        Usun, Vsun, Wsun :: scalars (km/s)
+            Solar pecular motion
+        a2, a3 :: scalars
+            Rotation curve parameters
+
+    Inputs: Nothing
+    Returns: params, cov
+        params :: 1-D array (length 6) scalars
+        cov :: 2-D array (6x6) of scalars
+    """
+    # A5 model parameters (R0, Usun, Vsun, Wsun, a2, a3)
+    params = np.array([8.15, 10.6, 10.7, 7.6, 0.96, 1.62])
+
+    # A5 model uncertainties
+    errors = np.array([0.15, 1.2, 6.0, 0.7, 0.05, 0.02])
+
+    # load correlation matrix
+    fname = os.path.join(os.path.dirname(__file__), "data/reid19_corr.dat")
+    idx = np.array([0, 3, 4, 5, 9, 10])
+    corr = np.genfromtxt(fname, comments="#")
+    corr = corr[idx][:, idx]
+
+    # covariance matrix
+    cov = corr * np.matmul(errors[:, None], errors[None, :])
+    return params, cov
 
 
 class BaseModel:
@@ -83,11 +118,8 @@ class BaseModel:
         if len(glat) != self.size or len(vlsr) != self.size:
             raise ValueError("Shape mismatch between glong, glat, and vlsr")
 
-        # Load Reid et al. (2019) kernel density estimate mean
-        # and covariance for the rotation curve parameters
-        fname = os.path.join(os.path.dirname(__file__), "data/reid19_mv.pkl")
-        with open(fname, "rb") as f:
-            reid19_mean, reid19_cov = pickle.load(f)
+        # Load Reid et al. (2019) mean and covariances for the rotation curve parameters
+        reid19_mean, reid19_cov = load_reid19_params()
 
         # Define model
         with pm.Model(
@@ -237,9 +269,11 @@ class BaseModel:
                 truths["Wsun"],
                 truths["a2"],
                 truths["a3"],
-                truths["shape"]
-                if "shape" in self.var_names
-                else truths["mom3_mom2_abs_z_ratio"],
+                (
+                    truths["shape"]
+                    if "shape" in self.var_names
+                    else truths["mom3_mom2_abs_z_ratio"]
+                ),
                 truths["vlsr_err"],
                 1.0 - truths["outlier_frac"],
                 truths["outlier_frac"],
