@@ -28,12 +28,12 @@ import numpy as np
 #
 # Reid+2019 A5 rotation model parameters
 #
-__R0 = 8.1660  # kpc
-__Usun = 10.449  # km/s
-__Vsun = 12.092  # km/s
-__Wsun = 7.729  # km/s
-__a2 = 0.977
-__a3 = 1.623
+__R0 = 8.15  # kpc
+__Usun = 10.6  # km/s
+__Vsun = 10.7  # km/s
+__Wsun = 7.6  # km/s
+__a2 = 0.96
+__a3 = 1.62
 
 #
 # IAU defined LSR

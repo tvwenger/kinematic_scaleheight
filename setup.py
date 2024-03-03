@@ -22,11 +22,11 @@ from setuptools import setup
 
 setup(
     name="kinematic_scaleheight",
-    version="2.1",
+    version="2.2",
     description="Kinematic estimates of vertical cloud distribution",
     author="Trey V. Wenger",
     author_email="tvwenger@gmail.com",
     packages=["kinematic_scaleheight"],
     install_requires=["numpy", "scipy", "matplotlib", "pymc==5.8.2", "corner"],
-    package_data={"kinematic_scaleheight": ["data/reid19_mv.pkl"]},
+    package_data={"kinematic_scaleheight": ["data/reid19_corr.dat"]},
 )
