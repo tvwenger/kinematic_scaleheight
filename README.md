@@ -1,8 +1,13 @@
 # kinematic_scaleheight
-Demonstrate the error of the
-[Crovisier (1978)](https://ui.adsabs.harvard.edu/abs/1978A%26A....70...43C/abstract)
-method, and use various least squares and MCMC methods to kinematically estimate the vertical
-distribution of clouds in the Galactic plane.
+
+[![DOI](https://zenodo.org/badge/656757083.svg)](https://zenodo.org/doi/10.5281/zenodo.10818723)
+
+Infer the vertical distribution of HI absorption detections in the
+solar neighborhood, using the least squares analysis of [Crovisier
+(1978)](https://ui.adsabs.harvard.edu/abs/1978A%26A....70...43C/abstract)
+as well as a Bayesian model.
+
+See [Wenger et al. (2024)]() for more details.
 
 # Table of Contents
 - [Installation](#installation)
@@ -836,7 +841,7 @@ of this software via [Github](https://github.com/tvwenger/kinematic_scaleheight)
 
 # License and Copyright
 
-Copyright (c) 2023 Trey Wenger
+Copyright (c) 2023-2024 Trey Wenger
 
 GNU General Public License v3 (GNU GPLv3)
 
